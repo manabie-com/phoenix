@@ -10,6 +10,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from phoenix.db import models
 from phoenix.db.helpers import SupportedSQLDialect
 from phoenix.server.online_eval import session_sweeper
+from phoenix.server.online_eval.coordinator import (
+    LEASE_ATTEMPTS_EXHAUSTED_ERROR,
+    LEASE_TTL_SECONDS,
+)
 from phoenix.server.online_eval.derivation import MAX_ATTEMPTS, ResolvedCriteria
 from phoenix.server.online_eval.producer import resolve_criteria
 from phoenix.server.online_eval.session_sweeper import (
@@ -149,6 +153,40 @@ async def test_materializes_due_complete_session_with_activity_snapshot(
     assert unit.status == "PENDING"
     assert cursor.claimed_by == sweeper._sweeper_id
     assert live_work_count == 1
+
+
+async def test_terminalizes_exhausted_lapsed_session_lease(
+    db: DbSessionFactory,
+) -> None:
+    project_id, project_session_id, _ = await _add_session_liveness(db, age_seconds=600)
+    await _seed_criteria(db, project_id, evaluation_target="SESSION")
+    sweeper = SessionEvalSweeper(db)
+    await sweeper._tick()
+    async with db() as session:
+        await session.execute(
+            update(models.EvalSessionWorkUnit)
+            .where(models.EvalSessionWorkUnit.project_session_rowid == project_session_id)
+            .values(
+                status="RUNNING",
+                claimed_at=_now() - timedelta(seconds=LEASE_TTL_SECONDS + 1),
+                claimed_by="stopped-consumer",
+                attempts=MAX_ATTEMPTS - 1,
+            )
+        )
+
+    await sweeper._tick()
+
+    async with db() as session:
+        unit = (
+            await session.scalars(
+                select(models.EvalSessionWorkUnit).where(
+                    models.EvalSessionWorkUnit.project_session_rowid == project_session_id
+                )
+            )
+        ).one()
+    assert unit.status == "ERROR"
+    assert unit.attempts == MAX_ATTEMPTS
+    assert unit.error == LEASE_ATTEMPTS_EXHAUSTED_ERROR
 
 
 async def test_retained_long_delay_pairs_do_not_block_later_due_pair(
