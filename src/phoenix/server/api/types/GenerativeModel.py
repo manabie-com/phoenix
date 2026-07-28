@@ -7,14 +7,16 @@ from openinference.semconv.trace import OpenInferenceLLMProviderValues
 from strawberry.relay import Node, NodeID
 from strawberry.relay.types import GlobalID
 from strawberry.types import Info
-from strawberry.types.unset import UNSET
 from typing_extensions import TypeAlias, assert_never
 
 from phoenix.db import models
 from phoenix.server.api.context import Context
+from phoenix.server.api.dataloaders.cost_summary_scope import CostSummaryScope
 from phoenix.server.api.dataloaders.span_cost_detail_summary_entries_by_model_and_scope import (
-    CostDetailSummaryScope,
     GenerativeModelCostDetailSummaryKey,
+)
+from phoenix.server.api.dataloaders.span_cost_summary_by_model_and_scope import (
+    GenerativeModelCostSummaryKey,
 )
 from phoenix.server.api.exceptions import BadRequest
 from phoenix.server.api.input_types.TimeRange import TimeRange
@@ -34,7 +36,9 @@ class GenerativeModelKind(Enum):
 
 ProjectId: TypeAlias = int
 TimeRangeKey: TypeAlias = tuple[Optional[datetime], Optional[datetime]]
-CachedCostSummaryKey: TypeAlias = tuple[Optional[ProjectId], TimeRangeKey]
+# The same scope costSummary resolves against, flattened into a hashable key.
+# A project is always part of it; a single time bound may still be open.
+CachedCostSummaryKey: TypeAlias = tuple[ProjectId, TimeRangeKey]
 
 
 @strawberry.type
@@ -132,12 +136,17 @@ class GenerativeModel(Node, ModelInterface):
         return val
 
     def add_cached_cost_summary(
-        self, project_id: Optional[int], time_range: TimeRange, cost_summary: SpanCostSummary
+        self, project_id: int, time_range: TimeRange, cost_summary: SpanCostSummary
     ) -> None:
+        """Records a summary the caller already aggregated, under the scope it covers.
+
+        The top-models resolvers compute every model's summary in the query that
+        ranks them, so costSummary answers from here rather than asking its
+        loader to aggregate the same rows again.
+        """
         if self.cached_cost_summary is None:
             self.cached_cost_summary = {}
-        time_range_key = (time_range.start, time_range.end) if time_range else (None, None)
-        cache_key = (project_id, time_range_key)
+        cache_key = (project_id, (time_range.start, time_range.end))
         self.cached_cost_summary[cache_key] = cost_summary
 
     @strawberry.field
@@ -157,32 +166,27 @@ class GenerativeModel(Node, ModelInterface):
 
     @strawberry.field(
         description=(
-            "Total cost for this model. Narrowing by project or time range is only "
-            "answered on the topModelsByCost and topModelsByToken paths, which "
-            "precompute the scoped summary; any other caller passing projectId or "
-            "timeRange gets an error. Unlike costDetailSummaryEntries, this field "
-            "cannot yet resolve an arbitrary scope."
+            "This model's total cost within one project and time range. Both "
+            "arguments are required: a summary is always measured over a stated "
+            "scope rather than the model's whole history. The time range may "
+            "leave one bound open, but not both."
         )
     )  # type: ignore
     async def cost_summary(
         self,
         info: Info[Context, None],
-        project_id: Optional[GlobalID] = UNSET,
-        time_range: Optional[TimeRange] = UNSET,
+        project_id: GlobalID,
+        time_range: TimeRange,
     ) -> SpanCostSummary:
+        scope = _to_cost_summary_scope(project_id, time_range)
+
         if self.cached_cost_summary is not None:
-            time_range_key = (time_range.start, time_range.end) if time_range else (None, None)
-            cache_key = (_get_project_rowid(project_id), time_range_key)
+            cache_key = (scope.project_id, (scope.start_time, scope.end_time))
             if cache_key in self.cached_cost_summary:
                 return self.cached_cost_summary[cache_key]
 
-        if time_range or project_id:
-            raise BadRequest(
-                "Cost summaries for specific projects or time ranges are not yet implemented"
-            )
-
-        loader = info.context.data_loaders.span_cost_summary_by_generative_model
-        summary = await loader.load(self.id)
+        loader = info.context.data_loaders.span_cost_summary_by_model_and_scope
+        summary = await loader.load(GenerativeModelCostSummaryKey(model_id=self.id, scope=scope))
         return SpanCostSummary(
             prompt=CostBreakdown(
                 tokens=summary.prompt.tokens,
@@ -200,27 +204,23 @@ class GenerativeModel(Node, ModelInterface):
 
     @strawberry.field(
         description=(
-            "Cost and token counts for this model, broken down by token type. "
-            "Both arguments are optional filters: projectId limits the breakdown to "
-            "spans in one project, timeRange to spans that started within it, and "
-            "omitting both returns the model's usage across all projects and time."
+            "This model's cost and token counts within one project and time "
+            "range, broken down by token type. Both arguments are required and "
+            "carry the same meaning as on costSummary, so the two fields always "
+            "describe the same scope."
         )
     )  # type: ignore
     async def cost_detail_summary_entries(
         self,
         info: Info[Context, None],
-        project_id: Optional[GlobalID] = UNSET,
-        time_range: Optional[TimeRange] = UNSET,
+        project_id: GlobalID,
+        time_range: TimeRange,
     ) -> list[SpanCostDetailSummaryEntry]:
         loader = info.context.data_loaders.span_cost_detail_summary_entries_by_model_and_scope
         summary = await loader.load(
             GenerativeModelCostDetailSummaryKey(
                 model_id=self.id,
-                scope=CostDetailSummaryScope(
-                    project_id=_get_project_rowid(project_id),
-                    start_time=time_range.start if time_range else None,
-                    end_time=time_range.end if time_range else None,
-                ),
+                scope=_to_cost_summary_scope(project_id, time_range),
             )
         )
         return [
@@ -240,15 +240,31 @@ class GenerativeModel(Node, ModelInterface):
         return await info.context.data_loaders.last_used_times_by_generative_model_id.load(self.id)
 
 
-def _get_project_rowid(project_id: Optional[GlobalID]) -> Optional[int]:
-    """Resolves a project's row ID, or None when no project narrows the query.
+def _to_cost_summary_scope(project_id: GlobalID, time_range: TimeRange) -> CostSummaryScope:
+    """Validates a field's scope arguments into the scope its loader batches on.
+
+    Both cost fields resolve their arguments here so they cannot drift into
+    disagreeing about what a scope means or which inputs it rejects.
+    """
+    if time_range.start is None and time_range.end is None:
+        raise BadRequest(
+            "A time range needs a start, an end, or both. "
+            "Leaving both open would summarize the project's whole history."
+        )
+    return CostSummaryScope(
+        project_id=_to_project_rowid(project_id),
+        start_time=time_range.start,
+        end_time=time_range.end,
+    )
+
+
+def _to_project_rowid(project_id: GlobalID) -> int:
+    """Resolves a project's row ID.
 
     The type name is checked before the row ID is parsed, so an ID carrying a
     non-numeric payload is still reported as an invalid project rather than
     surfacing as an internal error.
     """
-    if not project_id:
-        return None
     if project_id.type_name != models.Project.__name__:
         raise BadRequest("Invalid Project ID")
     try:

@@ -95,7 +95,7 @@ from .span_cost_summary_by_experiment_repeated_run_group import (
     SpanCostSummaryByExperimentRepeatedRunGroupDataLoader,
 )
 from .span_cost_summary_by_experiment_run import SpanCostSummaryByExperimentRunDataLoader
-from .span_cost_summary_by_generative_model import SpanCostSummaryByGenerativeModelDataLoader
+from .span_cost_summary_by_model_and_scope import SpanCostSummaryByModelAndScopeDataLoader
 from .span_cost_summary_by_project import SpanCostSummaryByProjectDataLoader, SpanCostSummaryCache
 from .span_cost_summary_by_project_session import SpanCostSummaryByProjectSessionDataLoader
 from .span_cost_summary_by_trace import SpanCostSummaryByTraceDataLoader
@@ -267,7 +267,7 @@ class DataLoaders:
         SpanCostSummaryByExperimentRepeatedRunGroupDataLoader
     )
     span_cost_summary_by_experiment_run: SpanCostSummaryByExperimentRunDataLoader
-    span_cost_summary_by_generative_model: SpanCostSummaryByGenerativeModelDataLoader
+    span_cost_summary_by_model_and_scope: SpanCostSummaryByModelAndScopeDataLoader
     span_cost_summary_by_project: SpanCostSummaryByProjectDataLoader
     span_cost_summary_by_project_session: SpanCostSummaryByProjectSessionDataLoader
     span_cost_summary_by_trace: SpanCostSummaryByTraceDataLoader
@@ -447,7 +447,7 @@ def build_data_loaders(
             db
         ),
         span_cost_summary_by_experiment_run=SpanCostSummaryByExperimentRunDataLoader(db),
-        span_cost_summary_by_generative_model=SpanCostSummaryByGenerativeModelDataLoader(db),
+        span_cost_summary_by_model_and_scope=SpanCostSummaryByModelAndScopeDataLoader(db),
         span_cost_summary_by_project=SpanCostSummaryByProjectDataLoader(
             db,
             cache_map=cache_for_dataloaders.token_cost if cache_for_dataloaders else None,

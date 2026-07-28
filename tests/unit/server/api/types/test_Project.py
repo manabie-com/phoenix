@@ -472,6 +472,149 @@ class TestTopModels:
         assert (empty_cost_data := empty_cost_response.data) is not None
         assert len(empty_cost_data["node"]["topModelsByCost"]) == 0
 
+    async def test_cost_summary_is_scoped_to_one_project_and_time_window(
+        self,
+        db: DbSessionFactory,
+        gql_client: AsyncGraphQLClient,
+    ) -> None:
+        """Resolving costSummary off the top-models path goes through the scoped loader.
+
+        The top-models resolvers precompute their summaries into a cache, so
+        only a direct query on the model reaches the loader that does the
+        scoping. Two projects and two times pin down both filters, and an
+        open-ended range covers the "since"/"until" spellings.
+        """
+        async with db() as session:
+            model = await _add_generative_model(session, name="scoped-summary-model")
+            base_time = datetime(2024, 3, 1, tzinfo=timezone.utc)
+            costs = {
+                ("a", "early"): 10.0,
+                ("a", "late"): 20.0,
+                ("b", "early"): 100.0,
+            }
+            projects = {
+                name: await _add_project(session, name=f"scoped-summary-{name}")
+                for name in ("a", "b")
+            }
+            for (project_name, when), cost in costs.items():
+                at = base_time if when == "early" else base_time + timedelta(minutes=10)
+                trace = await _add_trace(session, projects[project_name], start_time=at)
+                span = await _add_span(session, trace=trace, start_time=at)
+                await _add_span_cost(
+                    session,
+                    span=span,
+                    trace=trace,
+                    model=model,
+                    total_cost=cost,
+                    total_tokens=cost * 10,
+                    prompt_cost=cost,
+                    prompt_tokens=cost * 10,
+                    completion_cost=0,
+                    completion_tokens=0,
+                    span_start_time=at,
+                )
+            await session.commit()
+
+        query = """
+            query ($modelId: ID!, $projectId: ID!, $timeRange: TimeRange!) {
+                node(id: $modelId) {
+                    ... on GenerativeModel {
+                        costSummary(projectId: $projectId, timeRange: $timeRange) {
+                            total { cost tokens }
+                        }
+                    }
+                }
+            }
+        """
+        model_gid = str(GlobalID(type_name="GenerativeModel", node_id=str(model.id)))
+
+        async def _total(project_name: str, time_range: dict[str, str]) -> dict[str, float]:
+            response = await gql_client.execute(
+                query=query,
+                variables={
+                    "modelId": model_gid,
+                    "projectId": str(
+                        GlobalID(type_name="Project", node_id=str(projects[project_name].id))
+                    ),
+                    "timeRange": time_range,
+                },
+            )
+            assert not response.errors
+            assert response.data is not None
+            total: dict[str, float] = response.data["node"]["costSummary"]["total"]
+            return total
+
+        whole_window = {
+            "start": base_time.isoformat(),
+            "end": (base_time + timedelta(minutes=15)).isoformat(),
+        }
+        # Project a's two spans, and nothing from project b
+        assert await _total("a", whole_window) == {"cost": 30.0, "tokens": 300.0}
+        assert await _total("b", whole_window) == {"cost": 100.0, "tokens": 1000.0}
+
+        # The end bound is exclusive, so a window closing before the late span drops it
+        assert await _total(
+            "a",
+            {
+                "start": base_time.isoformat(),
+                "end": (base_time + timedelta(minutes=5)).isoformat(),
+            },
+        ) == {"cost": 10.0, "tokens": 100.0}
+
+        # Open on the right: everything at or after the late span
+        assert await _total("a", {"start": (base_time + timedelta(minutes=5)).isoformat()}) == {
+            "cost": 20.0,
+            "tokens": 200.0,
+        }
+
+        # Open on the left: everything before the late span
+        assert await _total("a", {"end": (base_time + timedelta(minutes=5)).isoformat()}) == {
+            "cost": 10.0,
+            "tokens": 100.0,
+        }
+
+    @pytest.mark.parametrize("field", ["costSummary", "costDetailSummaryEntries"])
+    async def test_cost_fields_reject_a_time_range_with_neither_bound(
+        self,
+        field: str,
+        _cost_data: _CostTestData,
+        gql_client: AsyncGraphQLClient,
+    ) -> None:
+        """A range open at both ends would summarize all of history, so it is refused.
+
+        The argument is non-null in the schema, which stops it being omitted but
+        not from arriving empty, so the resolver is what closes that gap.
+        """
+        project_gid = str(GlobalID(type_name="Project", node_id=str(_cost_data.project.id)))
+        query = """
+            query ($projectId: ID!, $timeRange: TimeRange!, $unbounded: TimeRange!) {
+                node(id: $projectId) {
+                    ... on Project {
+                        topModelsByCost(timeRange: $timeRange) {
+                            __FIELD__
+                        }
+                    }
+                }
+            }
+        """.replace(
+            "__FIELD__",
+            f"{field}(projectId: $projectId, timeRange: $unbounded) "
+            f"{{ {'total { cost }' if field == 'costSummary' else 'tokenType'} }}",
+        )
+        response = await gql_client.execute(
+            query=query,
+            variables={
+                "projectId": project_gid,
+                "timeRange": {
+                    "start": _cost_data.base_time.isoformat(),
+                    "end": (_cost_data.base_time + timedelta(minutes=15)).isoformat(),
+                },
+                "unbounded": {},
+            },
+        )
+        assert response.errors
+        assert any("time range needs a start" in error.message for error in response.errors)
+
     @pytest.mark.parametrize(
         "bad_project_id",
         [
