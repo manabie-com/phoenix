@@ -1191,7 +1191,7 @@ class ProjectEvaluator(Node):
         record = await self._get_record(info)
         return EvaluationTarget(record.evaluation_target)
 
-    @strawberry.field(
+    @strawberry.field(  # type: ignore[untyped-decorator]
         description="Whether this project evaluator is currently eligible for scheduling."
     )
     async def schedulability_status(
@@ -1201,7 +1201,7 @@ class ProjectEvaluator(Node):
         status, _ = _project_evaluator_schedulability(await self._get_record(info))
         return status
 
-    @strawberry.field(
+    @strawberry.field(  # type: ignore[untyped-decorator]
         description=(
             "Machine-readable reason the project evaluator is not schedulable, or null when "
             "it is schedulable."
