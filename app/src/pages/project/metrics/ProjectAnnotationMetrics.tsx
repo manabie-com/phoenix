@@ -1,9 +1,13 @@
 import { css } from "@emotion/react";
 import type { ReactNode } from "react";
 import { Suspense, useState } from "react";
-import { graphql, useLazyLoadQuery } from "react-relay";
+import { graphql, useFragment, useLazyLoadQuery } from "react-relay";
 
 import { Loading, Text } from "@phoenix/components";
+import {
+  type AnnotationOptimizationConfig,
+  getPositiveOptimizationFromConfig,
+} from "@phoenix/components/annotation";
 import {
   AnnotationMetricsChart,
   type AnnotationMetricsSeries,
@@ -28,6 +32,7 @@ import { getNonNoteAnnotationNames } from "../spanAnnotationUtils";
 import type { ProjectAnnotationMetricNamesSessionQuery } from "./__generated__/ProjectAnnotationMetricNamesSessionQuery.graphql";
 import type { ProjectAnnotationMetricNamesSpanQuery } from "./__generated__/ProjectAnnotationMetricNamesSpanQuery.graphql";
 import type { ProjectAnnotationMetricNamesTraceQuery } from "./__generated__/ProjectAnnotationMetricNamesTraceQuery.graphql";
+import type { ProjectAnnotationMetricsConfigFragment$key } from "./__generated__/ProjectAnnotationMetricsConfigFragment.graphql";
 import type { ProjectAnnotationMetricsSessionQuery } from "./__generated__/ProjectAnnotationMetricsSessionQuery.graphql";
 import type { ProjectAnnotationMetricsSpanQuery } from "./__generated__/ProjectAnnotationMetricsSpanQuery.graphql";
 import type { ProjectAnnotationMetricsTraceQuery } from "./__generated__/ProjectAnnotationMetricsTraceQuery.graphql";
@@ -48,6 +53,66 @@ type AnnotationMetricsData = ReadonlyArray<{
     }>;
   }>;
 }>;
+
+type ProjectAnnotationMetricsResult = {
+  annotationSeries: AnnotationMetricsSeries[];
+  annotationConfigsByName: ReadonlyMap<string, AnnotationOptimizationConfig>;
+};
+
+function useProjectAnnotationConfigsByName(
+  project: ProjectAnnotationMetricsConfigFragment$key
+): ReadonlyMap<string, AnnotationOptimizationConfig> {
+  const data = useFragment(
+    graphql`
+      fragment ProjectAnnotationMetricsConfigFragment on Project {
+        annotationConfigs(first: 100) {
+          edges {
+            config: node {
+              ... on AnnotationConfigBase {
+                name
+                annotationType
+              }
+              ... on CategoricalAnnotationConfig {
+                optimizationDirection
+                values {
+                  label
+                  score
+                }
+              }
+              ... on ContinuousAnnotationConfig {
+                optimizationDirection
+                lowerBound
+                upperBound
+              }
+              ... on FreeformAnnotationConfig {
+                optimizationDirection
+                threshold
+                lowerBound
+                upperBound
+              }
+            }
+          }
+        }
+      }
+    `,
+    project
+  );
+  const configsByName = new Map<string, AnnotationOptimizationConfig>();
+  data.annotationConfigs.edges.forEach(({ config }) => {
+    if (config.name == null || config.annotationType == null) {
+      return;
+    }
+    configsByName.set(config.name, {
+      annotationType: config.annotationType,
+      optimizationDirection: config.optimizationDirection,
+      lowerBound: config.lowerBound,
+      upperBound: config.upperBound,
+      threshold: config.threshold,
+      values: config.values,
+    });
+  });
+  return configsByName;
+}
 
 function getProjectAnnotationMetricsSeries({
   data,
@@ -81,10 +146,12 @@ const annotationGridCSS = css`
 
 function ProjectAnnotationMetricsGridView({
   annotationSeries,
+  annotationConfigsByName,
   timeRange,
   onTimeRangeSelected,
 }: {
   annotationSeries: AnnotationMetricsSeries[];
+  annotationConfigsByName: ReadonlyMap<string, AnnotationOptimizationConfig>;
   timeRange: TimeRange;
   onTimeRangeSelected?: (timeRange: TimeRange) => void;
 }) {
@@ -101,6 +168,7 @@ function ProjectAnnotationMetricsGridView({
         <ProjectAnnotationMetricsPanel
           key={series.name}
           series={series}
+          annotationConfig={annotationConfigsByName.get(series.name)}
           timeRange={timeRange}
           timeTickFormatter={timeTickFormatter}
           fullTimeFormatter={fullTimeFormatter}
@@ -113,6 +181,7 @@ function ProjectAnnotationMetricsGridView({
 
 function ProjectAnnotationMetricsPanel({
   series,
+  annotationConfig,
   timeRange,
   timeTickFormatter,
   fullTimeFormatter,
@@ -120,6 +189,7 @@ function ProjectAnnotationMetricsPanel({
   fillHeight = false,
 }: {
   series: AnnotationMetricsSeries;
+  annotationConfig?: AnnotationOptimizationConfig;
   timeRange: TimeRange;
   timeTickFormatter: (date: Date) => string;
   fullTimeFormatter: (date: Date) => string;
@@ -160,6 +230,12 @@ function ProjectAnnotationMetricsPanel({
             yAxisProps={compactYAxisProps}
             syncId={PROJECT_METRICS_CHART_SYNC_ID}
             chartProps={chartProps}
+            getMeanScoreOptimization={(meanScore) =>
+              getPositiveOptimizationFromConfig({
+                config: annotationConfig,
+                score: meanScore,
+              })
+            }
             renderTooltipHeader={(point) => (
               <Text weight="heavy" size="S">
                 {fullTimeFormatter(new Date(point.x))}
@@ -196,10 +272,11 @@ export function ProjectAnnotationMetricPanel({
         }
       >
         <ProjectAnnotationMetricsSeriesLoader {...props}>
-          {(annotationSeries) => (
+          {({ annotationSeries, annotationConfigsByName }) => (
             <ProjectAnnotationMetricPanelContent
               {...props}
               annotationSeries={annotationSeries}
+              annotationConfigsByName={annotationConfigsByName}
               fillHeight={fillHeight}
             />
           )}
@@ -211,11 +288,13 @@ export function ProjectAnnotationMetricPanel({
 
 function ProjectAnnotationMetricPanelContent({
   annotationSeries,
+  annotationConfigsByName,
   annotationName,
   fillHeight,
   ...props
 }: ProjectMetricViewProps & {
   annotationSeries: AnnotationMetricsSeries[];
+  annotationConfigsByName: ReadonlyMap<string, AnnotationOptimizationConfig>;
   annotationName: string;
   fillHeight: boolean;
 }) {
@@ -232,6 +311,7 @@ function ProjectAnnotationMetricPanelContent({
     <ProjectAnnotationMetricsPanel
       {...props}
       series={series}
+      annotationConfig={annotationConfigsByName.get(series.name)}
       timeTickFormatter={timeTickFormatter}
       fullTimeFormatter={fullTimeFormatter}
       fillHeight={fillHeight}
@@ -250,10 +330,11 @@ export function ProjectAnnotationMetricsGrid({
           {...props}
           annotationLevel={annotationLevel}
         >
-          {(annotationSeries) => (
+          {({ annotationSeries, annotationConfigsByName }) => (
             <ProjectAnnotationMetricsGridView
               {...props}
               annotationSeries={annotationSeries}
+              annotationConfigsByName={annotationConfigsByName}
             />
           )}
         </ProjectAnnotationMetricsSeriesLoader>
@@ -338,7 +419,7 @@ type ProjectAnnotationMetricsQueryProps = ProjectMetricViewProps & {
 type ProjectAnnotationMetricsSeriesLoaderProps =
   ProjectAnnotationMetricsQueryProps & {
     annotationLevel: MetricChartTableView;
-    children: (annotationSeries: AnnotationMetricsSeries[]) => ReactNode;
+    children: (result: ProjectAnnotationMetricsResult) => ReactNode;
   };
 
 // Keep these Relay queries below the nearest Suspense boundary. Suspending from
@@ -381,7 +462,7 @@ function SessionAnnotationMetricsSeriesLoader({
 
 function useSpanAnnotationMetricsSeries(
   props: ProjectAnnotationMetricsQueryProps
-) {
+): ProjectAnnotationMetricsResult {
   const scale = useTimeBinScale({ timeRange: props.timeRange });
   const utcOffsetMinutes = useUTCOffsetMinutes();
   const data = useLazyLoadQuery<ProjectAnnotationMetricsSpanQuery>(
@@ -393,6 +474,7 @@ function useSpanAnnotationMetricsSeries(
       ) {
         project: node(id: $projectId) {
           ... on Project {
+            ...ProjectAnnotationMetricsConfigFragment
             spanAnnotationMetricsTimeSeries(
               timeRange: $timeRange
               timeBinConfig: $timeBinConfig
@@ -416,15 +498,21 @@ function useSpanAnnotationMetricsSeries(
     getQueryVariables({ ...props, scale, utcOffsetMinutes }),
     useMetricQueryFetchOptions()
   );
-  return getProjectAnnotationMetricsSeries({
-    data: data.project.spanAnnotationMetricsTimeSeries?.data ?? [],
-    annotationName: props.annotationName,
-  });
+  const annotationConfigsByName = useProjectAnnotationConfigsByName(
+    data.project
+  );
+  return {
+    annotationSeries: getProjectAnnotationMetricsSeries({
+      data: data.project.spanAnnotationMetricsTimeSeries?.data ?? [],
+      annotationName: props.annotationName,
+    }),
+    annotationConfigsByName,
+  };
 }
 
 function useTraceAnnotationMetricsSeries(
   props: ProjectAnnotationMetricsQueryProps
-) {
+): ProjectAnnotationMetricsResult {
   const scale = useTimeBinScale({ timeRange: props.timeRange });
   const utcOffsetMinutes = useUTCOffsetMinutes();
   const data = useLazyLoadQuery<ProjectAnnotationMetricsTraceQuery>(
@@ -436,6 +524,7 @@ function useTraceAnnotationMetricsSeries(
       ) {
         project: node(id: $projectId) {
           ... on Project {
+            ...ProjectAnnotationMetricsConfigFragment
             traceAnnotationMetricsTimeSeries(
               timeRange: $timeRange
               timeBinConfig: $timeBinConfig
@@ -459,15 +548,21 @@ function useTraceAnnotationMetricsSeries(
     getQueryVariables({ ...props, scale, utcOffsetMinutes }),
     useMetricQueryFetchOptions()
   );
-  return getProjectAnnotationMetricsSeries({
-    data: data.project.traceAnnotationMetricsTimeSeries?.data ?? [],
-    annotationName: props.annotationName,
-  });
+  const annotationConfigsByName = useProjectAnnotationConfigsByName(
+    data.project
+  );
+  return {
+    annotationSeries: getProjectAnnotationMetricsSeries({
+      data: data.project.traceAnnotationMetricsTimeSeries?.data ?? [],
+      annotationName: props.annotationName,
+    }),
+    annotationConfigsByName,
+  };
 }
 
 function useSessionAnnotationMetricsSeries(
   props: ProjectAnnotationMetricsQueryProps
-) {
+): ProjectAnnotationMetricsResult {
   const scale = useTimeBinScale({ timeRange: props.timeRange });
   const utcOffsetMinutes = useUTCOffsetMinutes();
   const data = useLazyLoadQuery<ProjectAnnotationMetricsSessionQuery>(
@@ -479,6 +574,7 @@ function useSessionAnnotationMetricsSeries(
       ) {
         project: node(id: $projectId) {
           ... on Project {
+            ...ProjectAnnotationMetricsConfigFragment
             sessionAnnotationMetricsTimeSeries(
               timeRange: $timeRange
               timeBinConfig: $timeBinConfig
@@ -502,10 +598,16 @@ function useSessionAnnotationMetricsSeries(
     getQueryVariables({ ...props, scale, utcOffsetMinutes }),
     useMetricQueryFetchOptions()
   );
-  return getProjectAnnotationMetricsSeries({
-    data: data.project.sessionAnnotationMetricsTimeSeries?.data ?? [],
-    annotationName: props.annotationName,
-  });
+  const annotationConfigsByName = useProjectAnnotationConfigsByName(
+    data.project
+  );
+  return {
+    annotationSeries: getProjectAnnotationMetricsSeries({
+      data: data.project.sessionAnnotationMetricsTimeSeries?.data ?? [],
+      annotationName: props.annotationName,
+    }),
+    annotationConfigsByName,
+  };
 }
 
 function getQueryVariables({
