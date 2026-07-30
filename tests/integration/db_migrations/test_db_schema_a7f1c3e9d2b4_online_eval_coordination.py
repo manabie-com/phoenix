@@ -224,20 +224,16 @@ class TestEvalSessionWorkUnits(_OnlineEvalSchemaTest):
     @override
     @classmethod
     def _get_upgraded_schema_info(cls, db_backend: _DBBackend) -> _TableSchemaInfo:
-        unique_name = _constraint_name(
-            "uq_eval_session_work_units_project_session_rowid_evaluator_id_config_fingerprint",
-            db_backend,
-        )
         index_names = {
             "ix_eval_session_work_units_claimable",
             "ix_eval_session_work_units_evaluator_id",
             "ix_eval_session_work_units_criteria_id",
             "ix_eval_session_work_units_error_attempts",
             "ix_eval_session_work_units_terminal",
+            "uq_eval_session_work_units_live_key",
         }
         constraint_names = {
             "pk_eval_session_work_units",
-            unique_name,
             _constraint_name(
                 "fk_eval_session_work_units_project_session_rowid_project_sessions",
                 db_backend,
@@ -253,7 +249,7 @@ class TestEvalSessionWorkUnits(_OnlineEvalSchemaTest):
             "ck_eval_session_work_units_`valid_eval_work_status`",
         }
         if db_backend == "postgresql":
-            index_names.update({"pk_eval_session_work_units", unique_name})
+            index_names.add("pk_eval_session_work_units")
         elif db_backend == "sqlite":
             index_names.add("sqlite_autoindex_eval_session_work_units_1")
         else:

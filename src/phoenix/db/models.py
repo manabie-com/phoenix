@@ -3466,10 +3466,18 @@ class EvalSessionWorkUnit(HasId):
     criteria: Mapped["ProjectEvaluatorCriteria"] = relationship("ProjectEvaluatorCriteria")
 
     __table_args__ = (
-        UniqueConstraint(
+        Index(
+            "uq_eval_session_work_units_live_key",
             "project_session_rowid",
             "evaluator_id",
             "config_fingerprint",
+            unique=True,
+            postgresql_where=text(
+                "status IN ('PENDING', 'RUNNING') OR status = 'ERROR' AND attempts < 3"
+            ),
+            sqlite_where=text(
+                "status IN ('PENDING', 'RUNNING') OR status = 'ERROR' AND attempts < 3"
+            ),
         ),
         Index(
             "ix_eval_session_work_units_claimable",

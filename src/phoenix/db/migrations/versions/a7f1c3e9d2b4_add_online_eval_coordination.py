@@ -93,10 +93,17 @@ def _create_session_work_units_table() -> None:
             nullable=False,
             server_default=sa.func.now(),
         ),
-        sa.UniqueConstraint(
-            "project_session_rowid",
-            "evaluator_id",
-            "config_fingerprint",
+    )
+    op.create_index(
+        "uq_eval_session_work_units_live_key",
+        "eval_session_work_units",
+        ["project_session_rowid", "evaluator_id", "config_fingerprint"],
+        unique=True,
+        postgresql_where=sa.text(
+            "status IN ('PENDING', 'RUNNING') OR status = 'ERROR' AND attempts < 3"
+        ),
+        sqlite_where=sa.text(
+            "status IN ('PENDING', 'RUNNING') OR status = 'ERROR' AND attempts < 3"
         ),
     )
     op.create_index(
