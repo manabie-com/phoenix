@@ -451,6 +451,40 @@ export async function runPxiModelPreflight({
 }
 
 /**
+ * Resolve the model for a restored session. Explicit model flags win; otherwise
+ * a valid persisted selection is used, with the CLI default as a safe fallback.
+ */
+export async function resolveRestoredPxiModelSelection({
+  options,
+  persistedModelSelection,
+  fetchImpl = globalThis.fetch,
+}: {
+  options: PxiRuntimeOptions;
+  persistedModelSelection: ModelSelection;
+  fetchImpl?: typeof globalThis.fetch;
+}): Promise<ModelSelection> {
+  if (options.hasExplicitModelSelection) {
+    return options.modelSelection;
+  }
+  if (options.skipModelPreflight) {
+    return persistedModelSelection;
+  }
+  try {
+    const data = await fetchPxiModelPreflight({
+      config: options.config,
+      fetchImpl,
+    });
+    validatePxiModelSelection({
+      data,
+      modelSelection: persistedModelSelection,
+    });
+    return persistedModelSelection;
+  } catch {
+    return options.modelSelection;
+  }
+}
+
+/**
  * Wrap an error thrown while talking to PXI into a single message that names the
  * model and appends a tailored next step — pointing custom providers at their
  * Phoenix settings and built-in providers at credential configuration or

@@ -8469,6 +8469,13 @@
             "type": "boolean",
             "title": "Is Ephemeral"
           },
+          "model": {
+            "$ref": "#/components/schemas/AgentModelSelection"
+          },
+          "custom_provider_deleted": {
+            "type": "boolean",
+            "title": "Custom Provider Deleted"
+          },
           "is_active": {
             "type": "boolean",
             "title": "Is Active",
@@ -8489,6 +8496,8 @@
           "created_at",
           "updated_at",
           "is_ephemeral",
+          "model",
+          "custom_provider_deleted",
           "is_active",
           "messages"
         ],
@@ -9568,6 +9577,9 @@
       },
       "CreateAgentSessionRequestBody": {
         "properties": {
+          "model": {
+            "$ref": "#/components/schemas/AgentModelSelection"
+          },
           "title": {
             "type": "string",
             "maxLength": 100,
@@ -9583,6 +9595,9 @@
           }
         },
         "type": "object",
+        "required": [
+          "model"
+        ],
         "title": "CreateAgentSessionRequestBody",
         "description": "Request body for creating a persisted agent session."
       },

@@ -1,5 +1,5 @@
 /**
- * @generated SignedSource<<5d5c25bd7fc69b84d8c73ac730a24306>>
+ * @generated SignedSource<<cc4e17a791783d07d08b820aeb7ba8f6>>
  * @lightSyntaxTransform
  */
 
@@ -9,6 +9,8 @@
 
 import { ConcreteRequest } from 'relay-runtime';
 import { FragmentRefs } from "relay-runtime";
+export type ModelProvider = "ANTHROPIC" | "AWS" | "AZURE_OPENAI" | "CEREBRAS" | "DEEPSEEK" | "FIREWORKS" | "GOOGLE" | "GROQ" | "MOONSHOT" | "OLLAMA" | "OPENAI" | "PERPLEXITY" | "TOGETHER" | "XAI";
+export type OpenAIApiType = "CHAT_COMPLETIONS" | "RESPONSES";
 export type BranchAgentSessionInput = {
   id: string;
   messageId: string;
@@ -21,11 +23,26 @@ export type useAgentChatBranchAgentSessionMutation$data = {
   readonly branchAgentSession: {
     readonly agentSession: {
       readonly createdAt: string;
+      readonly customProviderDeleted: boolean;
       readonly firstInput: string | null;
       readonly id: string;
       readonly isTemporary: boolean;
       readonly latestOutput: string | null;
       readonly messages: any;
+      readonly model: {
+        readonly __typename: "AgentBuiltinProviderModelSelection";
+        readonly modelName: string;
+        readonly openaiApiType: OpenAIApiType;
+        readonly provider: ModelProvider;
+      } | {
+        readonly __typename: "AgentCustomProviderModelSelection";
+        readonly modelName: string;
+        readonly providerId: string;
+      } | {
+        // This will never be '%other', but we need some
+        // value in case none of the concrete values match.
+        readonly __typename: "%other";
+      };
       readonly title: string;
       readonly updatedAt: string;
       readonly user: {
@@ -128,6 +145,75 @@ v12 = {
   "kind": "ScalarField",
   "name": "messages",
   "storageKey": null
+},
+v13 = {
+  "alias": null,
+  "args": null,
+  "kind": "ScalarField",
+  "name": "modelName",
+  "storageKey": null
+},
+v14 = {
+  "alias": null,
+  "args": null,
+  "concreteType": null,
+  "kind": "LinkedField",
+  "name": "model",
+  "plural": false,
+  "selections": [
+    {
+      "alias": null,
+      "args": null,
+      "kind": "ScalarField",
+      "name": "__typename",
+      "storageKey": null
+    },
+    {
+      "kind": "InlineFragment",
+      "selections": [
+        {
+          "alias": null,
+          "args": null,
+          "kind": "ScalarField",
+          "name": "provider",
+          "storageKey": null
+        },
+        (v13/*:: as any*/),
+        {
+          "alias": null,
+          "args": null,
+          "kind": "ScalarField",
+          "name": "openaiApiType",
+          "storageKey": null
+        }
+      ],
+      "type": "AgentBuiltinProviderModelSelection",
+      "abstractKey": null
+    },
+    {
+      "kind": "InlineFragment",
+      "selections": [
+        {
+          "alias": null,
+          "args": null,
+          "kind": "ScalarField",
+          "name": "providerId",
+          "storageKey": null
+        },
+        (v13/*:: as any*/)
+      ],
+      "type": "AgentCustomProviderModelSelection",
+      "abstractKey": null
+    }
+  ],
+  "storageKey": null
+},
+v15 = {
+  "alias": null,
+  "args": null,
+  "kind": "ScalarField",
+  "name": "customProviderDeleted",
+  "storageKey": null
 };
 return {
   "fragment": {
@@ -180,7 +266,9 @@ return {
                 ],
                 "storageKey": null
               },
-              (v12/*:: as any*/)
+              (v12/*:: as any*/),
+              (v14/*:: as any*/),
+              (v15/*:: as any*/)
             ],
             "storageKey": null
           }
@@ -237,7 +325,9 @@ return {
                 ],
                 "storageKey": null
               },
-              (v12/*:: as any*/)
+              (v12/*:: as any*/),
+              (v14/*:: as any*/),
+              (v15/*:: as any*/)
             ],
             "storageKey": null
           },
@@ -268,16 +358,16 @@ return {
     ]
   },
   "params": {
-    "cacheID": "f89b7b8b0f97a65da3e3761790631b80",
+    "cacheID": "c4d675a47b95e950234376ec4544bc56",
     "id": null,
     "metadata": {},
     "name": "useAgentChatBranchAgentSessionMutation",
     "operationKind": "mutation",
-    "text": "mutation useAgentChatBranchAgentSessionMutation(\n  $input: BranchAgentSessionInput!\n) {\n  branchAgentSession(input: $input) {\n    agentSession {\n      id\n      title\n      ...EditAgentSessionTitleDialog_session\n      isTemporary: isEphemeral\n      createdAt\n      updatedAt\n      firstInput\n      latestOutput\n      user {\n        username\n        profilePictureUrl\n        id\n      }\n      messages\n    }\n  }\n}\n\nfragment EditAgentSessionTitleDialog_session on AgentSession {\n  id\n  title\n}\n"
+    "text": "mutation useAgentChatBranchAgentSessionMutation(\n  $input: BranchAgentSessionInput!\n) {\n  branchAgentSession(input: $input) {\n    agentSession {\n      id\n      title\n      ...EditAgentSessionTitleDialog_session\n      isTemporary: isEphemeral\n      createdAt\n      updatedAt\n      firstInput\n      latestOutput\n      user {\n        username\n        profilePictureUrl\n        id\n      }\n      messages\n      model {\n        __typename\n        ... on AgentBuiltinProviderModelSelection {\n          provider\n          modelName\n          openaiApiType\n        }\n        ... on AgentCustomProviderModelSelection {\n          providerId\n          modelName\n        }\n      }\n      customProviderDeleted\n    }\n  }\n}\n\nfragment EditAgentSessionTitleDialog_session on AgentSession {\n  id\n  title\n}\n"
   }
 };
 })();
 
-(node as any).hash = "6354f2496c291bef8b6b164863a43f4d";
+(node as any).hash = "5dec309f97b65287e04403fcf1db6a2d";
 
 export default node;

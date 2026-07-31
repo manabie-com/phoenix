@@ -149,8 +149,10 @@ from phoenix.server.agents.vercel_ui_message_stream import (
 )
 from phoenix.server.api.helpers.agent_sessions import (
     TURN_LOCK_STALENESS,
+    get_agent_session_model,
     get_otel_session_id,
     is_turn_active,
+    stamp_session_model,
 )
 from phoenix.server.api.helpers.playground_registry import (
     PLAYGROUND_CLIENT_REGISTRY,
@@ -350,6 +352,7 @@ class ChatRequest(ChatSubmitMessage):
 class CreateAgentSessionRequestBody(V1RoutesBaseModel):
     """Request body for creating a persisted agent session."""
 
+    model: AgentModelSelection
     title: str = Field(
         default="",
         max_length=MAX_AGENT_SESSION_TITLE_LENGTH,
@@ -380,6 +383,8 @@ class AgentSessionSummary(V1RoutesBaseModel):
 
 
 class AgentSessionData(AgentSessionSummary):
+    model: AgentModelSelection
+    custom_provider_deleted: bool
     is_active: bool = Field(
         description=(
             "Whether a response is currently streaming on this session, i.e. its "
@@ -1730,16 +1735,24 @@ def create_agents_router(
             raise HTTPException(status_code=422, detail=str(exc)) from exc
         user = request.user if "user" in request.scope else None
         phoenix_user = user if isinstance(user, PhoenixUser) else None
-        async with request.app.state.db() as session:
-            agent_session = models.AgentSession(
-                user_id=int(phoenix_user.identity) if phoenix_user is not None else None,
-                title=title,
-                project_name=get_env_phoenix_agents_assistant_project_name(),
-                is_ephemeral=request_body.is_ephemeral,
-            )
-            session.add(agent_session)
-            await session.flush()
-            agent_session_rowid = agent_session.id
+        try:
+            async with request.app.state.db() as session:
+                agent_session = models.AgentSession(
+                    user_id=int(phoenix_user.identity) if phoenix_user is not None else None,
+                    title=title,
+                    project_name=get_env_phoenix_agents_assistant_project_name(),
+                    is_ephemeral=request_body.is_ephemeral,
+                )
+                session.add(agent_session)
+                await stamp_session_model(
+                    session,
+                    agent_session=agent_session,
+                    model=request_body.model,
+                )
+                await session.flush()
+                agent_session_rowid = agent_session.id
+        except AgentError as exc:
+            raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc
         return CreateAgentSessionResponseBody(
             data=AgentSession(
                 id=str(GlobalID(models.AgentSession.__name__, str(agent_session_rowid)))
@@ -1838,9 +1851,12 @@ def create_agents_router(
             raise HTTPException(status_code=404, detail="Agent session not found")
 
         summary = _to_agent_session_summary(agent_session)
+        model, custom_provider_deleted = get_agent_session_model(agent_session)
         return GetAgentSessionResponseBody(
             data=AgentSessionData(
                 **summary.model_dump(),
+                model=model,
+                custom_provider_deleted=custom_provider_deleted,
                 is_active=is_turn_active(
                     agent_session.heartbeat_at,
                     now=datetime.now(timezone.utc),
@@ -2038,6 +2054,11 @@ def create_agents_router(
                     agent_session_rowid=agent_session.id,
                 ):
                     return JSONResponse({"code": "agent_session_busy"}, status_code=409)
+                await stamp_session_model(
+                    session,
+                    agent_session=agent_session,
+                    model=body.model,
+                )
                 project_name = agent_session.project_name
                 session_needs_title = not agent_session.title
                 agent_session_rowid = agent_session.id

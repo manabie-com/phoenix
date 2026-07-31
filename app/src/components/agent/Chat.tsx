@@ -460,6 +460,7 @@ export function ChatView({
   isCompacting = false,
   compactionStatus,
   operationError,
+  modelFallbackNotice,
   clearOperationError,
   rewindToMessage,
   forkFromMessage,
@@ -486,6 +487,7 @@ export function ChatView({
   isCompacting?: boolean;
   compactionStatus?: string | null;
   operationError?: AgentChatOperationError | null;
+  modelFallbackNotice?: string | null;
   clearOperationError?: () => void;
   /**
    * Truncates the active session at a message; resolves to user text to
@@ -895,6 +897,13 @@ export function ChatView({
           </div>
         </ChatScrollContext.Provider>
         <div className="chat__input">
+          {modelFallbackNotice ? (
+            <div className="chat__operation-error" role="status">
+              <Alert variant="warning" title="Custom provider was deleted">
+                {modelFallbackNotice}
+              </Alert>
+            </div>
+          ) : null}
           {(operationError || (!rewindRequest && historyActionError)) && (
             <div className="chat__operation-error" role="alert">
               <Alert

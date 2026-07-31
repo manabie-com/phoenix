@@ -35,6 +35,19 @@ export const agentSessionQuery = graphql`
           username
           profilePictureUrl
         }
+        model {
+          __typename
+          ... on AgentBuiltinProviderModelSelection {
+            provider
+            modelName
+            openaiApiType
+          }
+          ... on AgentCustomProviderModelSelection {
+            providerId
+            modelName
+          }
+        }
+        customProviderDeleted
         messages
       }
     }

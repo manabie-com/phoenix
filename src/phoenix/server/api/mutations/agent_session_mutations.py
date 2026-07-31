@@ -12,6 +12,7 @@ from strawberry.types import Info
 from phoenix.config import get_env_phoenix_agents_assistant_project_name
 from phoenix.db import models
 from phoenix.db.types.data_stream_protocol import PhoenixUIMessage
+from phoenix.server.agents.exceptions import ProviderNotFoundError
 from phoenix.server.agents.session_titles import (
     truncate_agent_session_title,
     validate_agent_session_title,
@@ -25,6 +26,11 @@ from phoenix.server.api.auth import (
 )
 from phoenix.server.api.context import Context
 from phoenix.server.api.exceptions import BadRequest, NotFound
+from phoenix.server.api.helpers.agent_sessions import (
+    get_agent_session_model,
+    stamp_session_model,
+)
+from phoenix.server.api.input_types.AgentModelSelectionInput import AgentModelSelectionInput
 from phoenix.server.api.queries import Query
 from phoenix.server.api.types.AgentSession import AgentSession, to_gql_agent_session
 from phoenix.server.api.types.node import from_global_id_with_expected_type
@@ -32,6 +38,7 @@ from phoenix.server.api.types.node import from_global_id_with_expected_type
 
 @strawberry.input
 class CreateAgentSessionInput:
+    model: AgentModelSelectionInput
     title: str = strawberry.field(
         default="",
         description=("Optional initial title."),
@@ -133,6 +140,14 @@ class AgentSessionMutationMixin:
                 is_ephemeral=input.is_ephemeral,
             )
             session.add(agent_session)
+            try:
+                await stamp_session_model(
+                    session,
+                    agent_session=agent_session,
+                    model=input.model.to_model_selection(),
+                )
+            except ProviderNotFoundError as exc:
+                raise NotFound(str(exc)) from exc
             await session.flush()
         return CreateAgentSessionMutationPayload(
             agent_session=to_gql_agent_session(agent_session),
@@ -233,6 +248,12 @@ class AgentSessionMutationMixin:
                 is_ephemeral=source_session.is_ephemeral,
             )
             session.add(branch_session)
+            source_model, _ = get_agent_session_model(source_session)
+            await stamp_session_model(
+                session,
+                agent_session=branch_session,
+                model=source_model,
+            )
             await session.flush()
             regenerated_message_rows = [
                 models.AgentSessionMessage(

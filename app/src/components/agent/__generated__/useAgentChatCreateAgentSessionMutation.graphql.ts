@@ -1,5 +1,5 @@
 /**
- * @generated SignedSource<<ffe1d051af9f47adb4267c5c2a572782>>
+ * @generated SignedSource<<1bbc823914c8f113f986b298e44e7cf6>>
  * @lightSyntaxTransform
  */
 
@@ -9,9 +9,28 @@
 
 import { ConcreteRequest } from 'relay-runtime';
 import { FragmentRefs } from "relay-runtime";
+export type ModelProvider = "ANTHROPIC" | "AWS" | "AZURE_OPENAI" | "CEREBRAS" | "DEEPSEEK" | "FIREWORKS" | "GOOGLE" | "GROQ" | "MOONSHOT" | "OLLAMA" | "OPENAI" | "PERPLEXITY" | "TOGETHER" | "XAI";
+export type OpenAIApiType = "CHAT_COMPLETIONS" | "RESPONSES";
 export type CreateAgentSessionInput = {
   isEphemeral?: boolean;
+  model: AgentModelSelectionInput;
   title?: string;
+};
+export type AgentModelSelectionInput = {
+  builtin?: never;
+  custom: AgentCustomProviderModelSelectionInput;
+} | {
+  builtin: AgentBuiltinProviderModelSelectionInput;
+  custom?: never;
+};
+export type AgentCustomProviderModelSelectionInput = {
+  modelName: string;
+  providerId: string;
+};
+export type AgentBuiltinProviderModelSelectionInput = {
+  modelName: string;
+  openaiApiType?: OpenAIApiType;
+  provider: ModelProvider;
 };
 export type useAgentChatCreateAgentSessionMutation$variables = {
   connections: ReadonlyArray<string>;
@@ -21,10 +40,25 @@ export type useAgentChatCreateAgentSessionMutation$data = {
   readonly createAgentSession: {
     readonly agentSession: {
       readonly createdAt: string;
+      readonly customProviderDeleted: boolean;
       readonly firstInput: string | null;
       readonly id: string;
       readonly isTemporary: boolean;
       readonly latestOutput: string | null;
+      readonly model: {
+        readonly __typename: "AgentBuiltinProviderModelSelection";
+        readonly modelName: string;
+        readonly openaiApiType: OpenAIApiType;
+        readonly provider: ModelProvider;
+      } | {
+        readonly __typename: "AgentCustomProviderModelSelection";
+        readonly modelName: string;
+        readonly providerId: string;
+      } | {
+        // This will never be '%other', but we need some
+        // value in case none of the concrete values match.
+        readonly __typename: "%other";
+      };
       readonly title: string;
       readonly updatedAt: string;
       readonly user: {
@@ -120,6 +154,75 @@ v11 = {
   "kind": "ScalarField",
   "name": "profilePictureUrl",
   "storageKey": null
+},
+v12 = {
+  "alias": null,
+  "args": null,
+  "kind": "ScalarField",
+  "name": "modelName",
+  "storageKey": null
+},
+v13 = {
+  "alias": null,
+  "args": null,
+  "concreteType": null,
+  "kind": "LinkedField",
+  "name": "model",
+  "plural": false,
+  "selections": [
+    {
+      "alias": null,
+      "args": null,
+      "kind": "ScalarField",
+      "name": "__typename",
+      "storageKey": null
+    },
+    {
+      "kind": "InlineFragment",
+      "selections": [
+        {
+          "alias": null,
+          "args": null,
+          "kind": "ScalarField",
+          "name": "provider",
+          "storageKey": null
+        },
+        (v12/*:: as any*/),
+        {
+          "alias": null,
+          "args": null,
+          "kind": "ScalarField",
+          "name": "openaiApiType",
+          "storageKey": null
+        }
+      ],
+      "type": "AgentBuiltinProviderModelSelection",
+      "abstractKey": null
+    },
+    {
+      "kind": "InlineFragment",
+      "selections": [
+        {
+          "alias": null,
+          "args": null,
+          "kind": "ScalarField",
+          "name": "providerId",
+          "storageKey": null
+        },
+        (v12/*:: as any*/)
+      ],
+      "type": "AgentCustomProviderModelSelection",
+      "abstractKey": null
+    }
+  ],
+  "storageKey": null
+},
+v14 = {
+  "alias": null,
+  "args": null,
+  "kind": "ScalarField",
+  "name": "customProviderDeleted",
+  "storageKey": null
 };
 return {
   "fragment": {
@@ -171,7 +274,9 @@ return {
                   (v11/*:: as any*/)
                 ],
                 "storageKey": null
-              }
+              },
+              (v13/*:: as any*/),
+              (v14/*:: as any*/)
             ],
             "storageKey": null
           }
@@ -227,7 +332,9 @@ return {
                   (v3/*:: as any*/)
                 ],
                 "storageKey": null
-              }
+              },
+              (v13/*:: as any*/),
+              (v14/*:: as any*/)
             ],
             "storageKey": null
           },
@@ -258,16 +365,16 @@ return {
     ]
   },
   "params": {
-    "cacheID": "2039e2649105fef21ec6b368b88c0445",
+    "cacheID": "bdddda43d79b4b896bc67a6767be02a2",
     "id": null,
     "metadata": {},
     "name": "useAgentChatCreateAgentSessionMutation",
     "operationKind": "mutation",
-    "text": "mutation useAgentChatCreateAgentSessionMutation(\n  $input: CreateAgentSessionInput!\n) {\n  createAgentSession(input: $input) {\n    agentSession {\n      id\n      title\n      ...EditAgentSessionTitleDialog_session\n      isTemporary: isEphemeral\n      createdAt\n      updatedAt\n      firstInput\n      latestOutput\n      user {\n        username\n        profilePictureUrl\n        id\n      }\n    }\n  }\n}\n\nfragment EditAgentSessionTitleDialog_session on AgentSession {\n  id\n  title\n}\n"
+    "text": "mutation useAgentChatCreateAgentSessionMutation(\n  $input: CreateAgentSessionInput!\n) {\n  createAgentSession(input: $input) {\n    agentSession {\n      id\n      title\n      ...EditAgentSessionTitleDialog_session\n      isTemporary: isEphemeral\n      createdAt\n      updatedAt\n      firstInput\n      latestOutput\n      user {\n        username\n        profilePictureUrl\n        id\n      }\n      model {\n        __typename\n        ... on AgentBuiltinProviderModelSelection {\n          provider\n          modelName\n          openaiApiType\n        }\n        ... on AgentCustomProviderModelSelection {\n          providerId\n          modelName\n        }\n      }\n      customProviderDeleted\n    }\n  }\n}\n\nfragment EditAgentSessionTitleDialog_session on AgentSession {\n  id\n  title\n}\n"
   }
 };
 })();
 
-(node as any).hash = "d68c9de400e08e55cb088409bf0b790e";
+(node as any).hash = "6b8e864ea9d59c5c05d2ece3d73f229f";
 
 export default node;

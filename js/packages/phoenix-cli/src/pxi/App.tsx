@@ -28,7 +28,10 @@ import {
   type DraftEditorState,
 } from "./draftEditor";
 import { Markdown } from "./inkMarkdown";
-import { fetchRecommendedPxiModels } from "./preflight";
+import {
+  fetchRecommendedPxiModels,
+  resolveRestoredPxiModelSelection,
+} from "./preflight";
 import { formatTokenUsageLine, getLatestAssistantUsage } from "./tokenUsage";
 import {
   getToolProgressFromPart,
@@ -137,6 +140,7 @@ export type PxiAppProps = {
   }) => PxiChatClient;
   modelLoader?: () => Promise<ModelSelection[]>;
   sessionClient?: PxiSessionClient;
+  sessionModelResolver?: (model: ModelSelection) => Promise<ModelSelection>;
   initialMessages?: PxiMessage[];
 };
 
@@ -877,6 +881,7 @@ export function PxiApp({
   clientFactory,
   modelLoader,
   sessionClient,
+  sessionModelResolver,
   initialMessages = [],
 }: PxiAppProps) {
   const { exit } = useApp();
@@ -927,6 +932,16 @@ export function PxiApp({
     () => sessionClient ?? createPxiSessionClient({ config: options.config }),
     [options.config, sessionClient]
   );
+  const resolveSessionModel = useMemo(
+    () =>
+      sessionModelResolver ??
+      ((model: ModelSelection) =>
+        resolveRestoredPxiModelSelection({
+          options,
+          persistedModelSelection: model,
+        })),
+    [options, sessionModelResolver]
+  );
 
   // While another client's turn holds the session lock, poll the session until
   // the turn completes, then swap in the persisted transcript. Transient fetch
@@ -941,13 +956,18 @@ export function PxiApp({
     const pollSession = () => {
       void serverSessionClient
         .getSession({ sessionId: busySessionId })
-        .then((session) => {
+        .then(async (session) => {
           if (isStale || session.isActive) {
+            return;
+          }
+          const restoredModel = await resolveSessionModel(session.model);
+          if (isStale) {
             return;
           }
           // The other client's turn completed and its transcript persisted;
           // mirror the session-restore path by replacing the message list.
           setActiveSession(session);
+          setActiveModelSelection(restoredModel);
           setMessages(session.messages);
           setIsSessionBusy(false);
         })
@@ -960,7 +980,7 @@ export function PxiApp({
       isStale = true;
       clearInterval(intervalId);
     };
-  }, [busySessionId, serverSessionClient]);
+  }, [busySessionId, resolveSessionModel, serverSessionClient]);
 
   const handleExit = () => {
     abortControllerRef.current?.abort();
@@ -993,6 +1013,7 @@ export function PxiApp({
     modelRequestIdRef.current += 1;
     sessionRequestIdRef.current += 1;
     setActiveSession(null);
+    setActiveModelSelection(options.modelSelection);
     setIsDraftTemporary(temporary);
     setIsSessionBusy(false);
     setShowStaleRefreshNotice(false);
@@ -1157,9 +1178,12 @@ export function PxiApp({
     );
     void serverSessionClient
       .getSession({ sessionId: selectedSession.id })
-      .then((session) => {
+      .then(async (session) => {
+        if (sessionRequestIdRef.current !== requestId) return;
+        const restoredModel = await resolveSessionModel(session.model);
         if (sessionRequestIdRef.current !== requestId) return;
         setActiveSession(session);
+        setActiveModelSelection(restoredModel);
         setIsDraftTemporary(session.isTemporary);
         // Another client's turn may already hold the restored session's lock;
         // enter the busy state so the poll refreshes the transcript when it
@@ -1348,6 +1372,7 @@ export function PxiApp({
       if (!activeSession && (sessionClient || !resolvedClient)) {
         const session = await serverSessionClient.createSession({
           temporary: isDraftTemporary,
+          model: activeModelSelection,
         });
         setActiveSession(session);
         if (!resolvedClient) {
@@ -1428,10 +1453,13 @@ export function PxiApp({
           const requestId = sessionRequestIdRef.current;
           void serverSessionClient
             .getSession({ sessionId: staleSessionId })
-            .then((session) => {
+            .then(async (session) => {
               // A session switch or /new superseded this refresh.
               if (sessionRequestIdRef.current !== requestId) return;
+              const restoredModel = await resolveSessionModel(session.model);
+              if (sessionRequestIdRef.current !== requestId) return;
               setActiveSession(session);
+              setActiveModelSelection(restoredModel);
               setMessages(session.messages);
               setShowStaleRefreshNotice(true);
               if (session.isActive === true) {

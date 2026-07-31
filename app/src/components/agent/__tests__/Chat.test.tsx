@@ -95,6 +95,7 @@ function renderChatView(
     isCompacting = false,
     compactionStatus,
     operationError,
+    modelFallbackNotice,
     clearOperationError,
     rewindToMessage,
     forkFromMessage,
@@ -112,6 +113,7 @@ function renderChatView(
     isCompacting?: boolean;
     compactionStatus?: string | null;
     operationError?: { title: string; message: string } | null;
+    modelFallbackNotice?: string | null;
     clearOperationError?: () => void;
     rewindToMessage?: (messageId: string) => Promise<string | null>;
     forkFromMessage?: (messageId: string) => Promise<void>;
@@ -169,6 +171,7 @@ function renderChatView(
               isCompacting={isCompacting}
               compactionStatus={compactionStatus}
               operationError={operationError}
+              modelFallbackNotice={modelFallbackNotice}
               clearOperationError={clearOperationError}
               rewindToMessage={rewindToMessage}
               forkFromMessage={forkFromMessage}
@@ -619,6 +622,19 @@ describe("ChatView", () => {
       operationError?.querySelector("button")?.click();
     });
     expect(clearOperationError).toHaveBeenCalledOnce();
+  });
+
+  it("renders a deleted custom-provider fallback notice", () => {
+    renderChatView(root, {
+      modelFallbackNotice:
+        "The saved provider was deleted. Phoenix is using a fallback model.",
+    });
+
+    const notice = container.querySelector(
+      '.chat__operation-error[role="status"]'
+    );
+    expect(notice?.textContent).toContain("Custom provider was deleted");
+    expect(notice?.textContent).toContain("Phoenix is using a fallback model");
   });
 
   it("truncates and resends the last user message when retrying a failed turn", async () => {

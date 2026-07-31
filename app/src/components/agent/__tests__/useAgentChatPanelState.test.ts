@@ -84,4 +84,31 @@ describe("selectAgentModel", () => {
       modelName: "custom-model",
     });
   });
+
+  it("prefers a persisted session model over the new-session default", () => {
+    expect(
+      selectAgentModel(
+        {
+          defaultModelConfig: {
+            provider: "ANTHROPIC",
+            modelName: "claude-opus-4-6",
+            invocationParameters: getDefaultInvocationConfig("ANTHROPIC"),
+          },
+          modelConfigBySessionId: {
+            "session-1": {
+              provider: "OPENAI",
+              modelName: "gpt-5.5",
+              invocationParameters: getDefaultInvocationConfig("OPENAI"),
+            },
+          },
+        },
+        "session-1"
+      )
+    ).toEqual({
+      providerType: "builtin",
+      provider: "OPENAI",
+      modelName: "gpt-5.5",
+      openaiApiType: "responses",
+    });
+  });
 });

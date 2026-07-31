@@ -338,6 +338,15 @@ export interface AgentState extends AgentProps {
     sessionId: string,
     wasRefreshed: boolean
   ) => void;
+  /** Server-persisted model selections keyed by canonical session ID. */
+  modelConfigBySessionId: Partial<Record<string, ModelConfig>>;
+  /** Whether a persisted custom provider was deleted and a fallback is in use. */
+  customProviderDeletedBySessionId: Partial<Record<string, boolean>>;
+  setSessionModelConfig: (
+    sessionId: string,
+    config: ModelConfig,
+    customProviderDeleted?: boolean
+  ) => void;
 
   /**
    * Current unsent prompt-input draft keyed by session ID. Ephemeral and kept
@@ -684,6 +693,14 @@ export const createAgentStore = (initialProps?: Partial<AgentProps>) => {
             ...state.wasRefreshedFromStaleBySessionId,
           };
           delete newWasRefreshedFromStaleBySessionId[sessionId];
+          const newModelConfigBySessionId = {
+            ...state.modelConfigBySessionId,
+          };
+          delete newModelConfigBySessionId[sessionId];
+          const newCustomProviderDeletedBySessionId = {
+            ...state.customProviderDeletedBySessionId,
+          };
+          delete newCustomProviderDeletedBySessionId[sessionId];
           const newDraftInputBySessionId = { ...state.draftInputBySessionId };
           delete newDraftInputBySessionId[sessionId];
           const newPendingMessageBySessionId = {
@@ -703,6 +720,9 @@ export const createAgentStore = (initialProps?: Partial<AgentProps>) => {
             isBusyElsewhereBySessionId: newIsBusyElsewhereBySessionId,
             wasRefreshedFromStaleBySessionId:
               newWasRefreshedFromStaleBySessionId,
+            modelConfigBySessionId: newModelConfigBySessionId,
+            customProviderDeletedBySessionId:
+              newCustomProviderDeletedBySessionId,
             draftInputBySessionId: newDraftInputBySessionId,
             pendingMessageBySessionId: newPendingMessageBySessionId,
             pendingPatchExperimentsByToolCallId:
@@ -914,6 +934,35 @@ export const createAgentStore = (initialProps?: Partial<AgentProps>) => {
         },
         false,
         { type: "setSessionRefreshedFromStale" }
+      );
+    },
+    modelConfigBySessionId: {},
+    customProviderDeletedBySessionId: {},
+    setSessionModelConfig: (
+      sessionId,
+      config,
+      customProviderDeleted = false
+    ) => {
+      set(
+        (state) => {
+          const nextDeleted = {
+            ...state.customProviderDeletedBySessionId,
+          };
+          if (customProviderDeleted) {
+            nextDeleted[sessionId] = true;
+          } else {
+            delete nextDeleted[sessionId];
+          }
+          return {
+            modelConfigBySessionId: {
+              ...state.modelConfigBySessionId,
+              [sessionId]: config,
+            },
+            customProviderDeletedBySessionId: nextDeleted,
+          };
+        },
+        false,
+        { type: "setSessionModelConfig" }
       );
     },
     // -- Page and mounted contexts (ephemeral) --

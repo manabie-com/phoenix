@@ -61,9 +61,14 @@ import {
 import { getErrorMessagesFromRelayMutationError } from "@phoenix/utils/errorUtils";
 import { prependBasename } from "@phoenix/utils/routingUtils";
 
+import { useModelMenuData } from "../generative/useModelMenuData";
 import type { useAgentChatBranchAgentSessionMutation } from "./__generated__/useAgentChatBranchAgentSessionMutation.graphql";
 import type { useAgentChatCreateAgentSessionMutation } from "./__generated__/useAgentChatCreateAgentSessionMutation.graphql";
 import type { useAgentChatTruncateAgentSessionMutation } from "./__generated__/useAgentChatTruncateAgentSessionMutation.graphql";
+import {
+  resolvePersistedAgentModel,
+  type PersistedAgentModel,
+} from "./agentSessionModel";
 import {
   AGENT_SESSIONS_CONNECTION_KEY,
   SETTINGS_AGENT_SESSIONS_CONNECTION_KEY,
@@ -100,6 +105,29 @@ const SESSION_BUSY_ERROR_CODE = "agent_session_busy";
  */
 const SESSION_STALE_ERROR_CODE = "agent_session_stale";
 const SESSION_BUSY_POLL_INTERVAL_MS = 3000;
+
+function toAgentModelSelectionInput(
+  model: ReturnType<typeof selectAgentModel>
+) {
+  if (model.providerType === "custom") {
+    return {
+      custom: {
+        providerId: model.providerId,
+        modelName: model.modelName,
+      },
+    };
+  }
+  return {
+    builtin: {
+      provider: model.provider,
+      modelName: model.modelName,
+      openaiApiType:
+        model.openaiApiType === "chat_completions"
+          ? ("CHAT_COMPLETIONS" as const)
+          : ("RESPONSES" as const),
+    },
+  };
+}
 
 function buildAgentChatApiUrl(sessionId: string): string {
   return prependBasename(
@@ -142,6 +170,19 @@ const createAgentSessionMutation = graphql`
           username
           profilePictureUrl
         }
+        model {
+          __typename
+          ... on AgentBuiltinProviderModelSelection {
+            provider
+            modelName
+            openaiApiType
+          }
+          ... on AgentCustomProviderModelSelection {
+            providerId
+            modelName
+          }
+        }
+        customProviderDeleted
       }
     }
   }
@@ -193,6 +234,19 @@ const branchAgentSessionMutation = graphql`
           profilePictureUrl
         }
         messages
+        model {
+          __typename
+          ... on AgentBuiltinProviderModelSelection {
+            provider
+            modelName
+            openaiApiType
+          }
+          ... on AgentCustomProviderModelSelection {
+            providerId
+            modelName
+          }
+        }
+        customProviderDeleted
       }
     }
   }
@@ -238,6 +292,7 @@ export function useAgentChat({
   isActive?: boolean;
 }) {
   const store = useAgentStore();
+  const { availableBuiltinModels, customProviders } = useModelMenuData();
   const runtime = useAgentChatRuntime();
   const relayEnvironment = useRelayEnvironment();
   const [operationError, setOperationError] =
@@ -345,7 +400,10 @@ export function useAgentChat({
                 // The Chat is cached per-session in the runtime registry and
                 // may outlive the surface that created it, so the model must
                 // be read from the store at request time — never captured.
-                modelSelection: selectAgentModel(store.getState()),
+                modelSelection: selectAgentModel(
+                  store.getState(),
+                  targetSessionId
+                ),
                 turnTraceContext: turnTraceContext.getActive(),
                 toolTimings,
               }),
@@ -557,7 +615,24 @@ export function useAgentChat({
         chatInstance.messages = Array.isArray(agentSession.messages)
           ? (agentSession.messages as AgentUIMessage[])
           : [];
-        store.getState().setSessionBusyElsewhere(persistedSessionId, false);
+        const state = store.getState();
+        const persistedModel = agentSession.model;
+        if (
+          persistedModel.__typename === "AgentBuiltinProviderModelSelection" ||
+          persistedModel.__typename === "AgentCustomProviderModelSelection"
+        ) {
+          state.setSessionModelConfig(
+            persistedSessionId,
+            resolvePersistedAgentModel({
+              model: persistedModel,
+              availableBuiltinModels,
+              customProviders,
+              fallback: state.defaultModelConfig,
+            }),
+            agentSession.customProviderDeleted
+          );
+        }
+        state.setSessionBusyElsewhere(persistedSessionId, false);
       } catch {
         // Transient failure: wait for the next poll tick.
       }
@@ -576,6 +651,8 @@ export function useAgentChat({
     chatInstance,
     isBusyElsewhere,
     relayEnvironment,
+    availableBuiltinModels,
+    customProviders,
     store,
   ]);
 
@@ -682,9 +759,14 @@ export function useAgentChat({
     // wait too; clearSessionEphemeralState removes the flag on success.
     store.getState().setSessionResponsePending(DRAFT_SESSION_ID, true);
     const isTemporary = store.getState().isDraftSessionTemporary;
+    const draftState = store.getState();
+    const modelSelection = selectAgentModel(draftState, DRAFT_SESSION_ID);
     commitCreateAgentSession({
       variables: {
-        input: { isEphemeral: isTemporary },
+        input: {
+          isEphemeral: isTemporary,
+          model: toAgentModelSelectionInput(modelSelection),
+        },
         connections: isTemporary
           ? [sessionsConnectionId]
           : [sessionsConnectionId, settingsSessionsConnectionId],
@@ -705,6 +787,10 @@ export function useAgentChat({
         );
         setPendingDraftUserMessage(null);
         const state = store.getState();
+        state.setSessionModelConfig(
+          newSessionId,
+          draftState.defaultModelConfig
+        );
         state.clearSessionEphemeralState(DRAFT_SESSION_ID);
         state.setIsDraftSessionTemporary(state.defaultTemporaryChat);
         state.setActiveSession(newSessionId);
@@ -800,7 +886,7 @@ export function useAgentChat({
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
-            model: selectAgentModel(store.getState()),
+            model: selectAgentModel(store.getState(), sessionId),
           }),
         });
         if (!response.ok) {
@@ -1039,6 +1125,22 @@ export function useAgentChat({
                 ),
             });
             const state = store.getState();
+            const branchModel = payload.agentSession.model;
+            if (
+              branchModel.__typename === "AgentBuiltinProviderModelSelection" ||
+              branchModel.__typename === "AgentCustomProviderModelSelection"
+            ) {
+              state.setSessionModelConfig(
+                branchSessionId,
+                resolvePersistedAgentModel({
+                  model: branchModel as PersistedAgentModel,
+                  availableBuiltinModels,
+                  customProviders,
+                  fallback: state.defaultModelConfig,
+                }),
+                payload.agentSession.customProviderDeleted
+              );
+            }
             if (restoredInput) {
               state.setDraftInput(branchSessionId, restoredInput);
             }
@@ -1055,9 +1157,11 @@ export function useAgentChat({
     },
     [
       chatInstance,
+      availableBuiltinModels,
       clearError,
       commitBranchAgentSession,
       createChatForSession,
+      customProviders,
       isDraft,
       runtime,
       sessionId,

@@ -1729,6 +1729,9 @@ export interface components {
             updated_at: string;
             /** Is Ephemeral */
             is_ephemeral: boolean;
+            model: components["schemas"]["AgentModelSelection"];
+            /** Custom Provider Deleted */
+            custom_provider_deleted: boolean;
             /**
              * Is Active
              * @description Whether a response is currently streaming on this session, i.e. its lock has a live (non-stale) heartbeat.
@@ -2150,6 +2153,7 @@ export interface components {
          * @description Request body for creating a persisted agent session.
          */
         CreateAgentSessionRequestBody: {
+            model: components["schemas"]["AgentModelSelection"];
             /**
              * Title
              * @description Optional initial title.

@@ -1113,7 +1113,14 @@ describe("PXI app", () => {
     await writeInput({ stdin, input: "hello" });
     await writeInput({ stdin, input: "\r" });
 
-    expect(createSession).toHaveBeenCalledWith({ temporary: true });
+    expect(createSession).toHaveBeenCalledWith({
+      temporary: true,
+      model: {
+        providerType: "builtin",
+        provider: "OPENAI",
+        modelName: "gpt-5.4",
+      },
+    });
     unmount();
   });
 
@@ -1215,6 +1222,61 @@ describe("PXI app", () => {
     expect(getSession).toHaveBeenCalledWith({ sessionId: "session-2" });
     expect(stripAnsi(lastFrame() ?? "")).toContain("restored conversation");
     expect(stripAnsi(lastFrame() ?? "")).toContain("session: Second session");
+    unmount();
+  });
+
+  it("adopts the persisted model when restoring a session", async () => {
+    const persistedModel: ModelSelection = {
+      providerType: "builtin",
+      provider: "GOOGLE",
+      modelName: "gemini-3.5-flash",
+    };
+    const sessionModelResolver = vi.fn(async (model: ModelSelection) => model);
+    const sessionClient: PxiSessionClient = {
+      createSession: async () => {
+        throw new Error("not used");
+      },
+      listSessions: async () => [
+        {
+          id: "session-1",
+          title: "Persisted session",
+          updatedAt: "2026-07-24T13:00:00Z",
+          isTemporary: false,
+        },
+      ],
+      getSession: async ({ sessionId }) => ({
+        id: sessionId,
+        title: "Persisted session",
+        updatedAt: "2026-07-24T13:00:00Z",
+        isTemporary: false,
+        isActive: false,
+        messages: [],
+        model: persistedModel,
+        customProviderDeleted: false,
+      }),
+      compactSession: async () => {
+        throw new Error("not used");
+      },
+    };
+    const { lastFrame, stdin, unmount } = render(
+      <PxiApp
+        options={createOptions()}
+        client={{ sendMessage: async () => null }}
+        sessionClient={sessionClient}
+        sessionModelResolver={sessionModelResolver}
+      />
+    );
+
+    await writeInput({ stdin, input: "/sessions" });
+    await writeInput({ stdin, input: "\r" });
+    await act(async () => Promise.resolve());
+    await writeInput({ stdin, input: "\r" });
+    await act(async () => Promise.resolve());
+
+    expect(sessionModelResolver).toHaveBeenCalledWith(persistedModel);
+    expect(stripAnsi(lastFrame() ?? "")).toContain(
+      "model: GOOGLE/gemini-3.5-flash"
+    );
     unmount();
   });
 

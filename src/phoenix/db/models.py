@@ -54,6 +54,7 @@ from typing_extensions import Self, TypeAlias
 
 from phoenix.config import get_env_database_schema
 from phoenix.datetime_utils import normalize_datetime
+from phoenix.db.types.agent_session_config import AgentBuiltinProviderConfig
 from phoenix.db.types.annotation_configs import (
     AnnotationConfig as AnnotationConfigModel,
 )
@@ -222,6 +223,18 @@ JSON_ = (
     )
 )
 
+NULLABLE_JSON_ = (
+    JSON(none_as_null=True)
+    .with_variant(
+        postgresql.JSONB(none_as_null=True),
+        "postgresql",
+    )
+    .with_variant(
+        JSONB(none_as_null=True),
+        "sqlite",
+    )
+)
+
 _Integer = Integer().with_variant(
     sa.BigInteger(),
     "postgresql",
@@ -308,6 +321,29 @@ class _ModelProvider(TypeDecorator[ModelProvider]):
 
     def process_result_value(self, value: Optional[str], _: Dialect) -> Optional[ModelProvider]:
         return None if value is None else ModelProvider(value)
+
+
+class _AgentBuiltinProviderConfig(TypeDecorator[AgentBuiltinProviderConfig]):
+    cache_ok = True
+    impl = NULLABLE_JSON_
+
+    def process_bind_param(
+        self,
+        value: Optional[AgentBuiltinProviderConfig],
+        _: Dialect,
+    ) -> Optional[dict[str, Any]]:
+        if value is None:
+            return None
+        return value.model_dump(exclude_defaults=True)
+
+    def process_result_value(
+        self,
+        value: Optional[dict[str, Any]],
+        _: Dialect,
+    ) -> Optional[AgentBuiltinProviderConfig]:
+        if value is None:
+            return None
+        return AgentBuiltinProviderConfig.model_validate(value)
 
 
 class _InvocationParameters(TypeDecorator[PromptInvocationParameters]):
@@ -3309,6 +3345,16 @@ class AgentSession(HasId):
         nullable=True,  # sessions may be created while auth is disabled
     )
     title: Mapped[str] = mapped_column(String, nullable=False)
+    model_provider: Mapped[ModelProvider] = mapped_column(_ModelProvider, nullable=False)
+    model_name: Mapped[str] = mapped_column(String, nullable=False)
+    custom_provider_id: Mapped[Optional[int]] = mapped_column(
+        ForeignKey("generative_model_custom_providers.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    builtin_provider: Mapped[Optional[AgentBuiltinProviderConfig]] = mapped_column(
+        _AgentBuiltinProviderConfig,
+        nullable=True,
+    )
     created_at: Mapped[datetime] = mapped_column(UtcTimeStamp, server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(
         UtcTimeStamp, server_default=func.now(), onupdate=func.now()
@@ -3316,6 +3362,9 @@ class AgentSession(HasId):
     is_ephemeral: Mapped[bool] = mapped_column(default=False)
     heartbeat_at: Mapped[Optional[datetime]] = mapped_column(UtcTimeStamp, nullable=True)
     user: Mapped[Optional["User"]] = relationship("User")
+    custom_provider: Mapped[Optional["GenerativeModelCustomProvider"]] = relationship(
+        "GenerativeModelCustomProvider"
+    )
     snapshot: Mapped[Optional["AgentSessionSnapshot"]] = relationship(
         "AgentSessionSnapshot",
         back_populates="agent_session",
@@ -3328,6 +3377,10 @@ class AgentSession(HasId):
         back_populates="agent_session",
     )
     __table_args__ = (
+        CheckConstraint(
+            "NOT (custom_provider_id IS NOT NULL AND builtin_provider IS NOT NULL)",
+            name="valid_provider_routing",
+        ),
         Index(
             "ix_agent_sessions_user_id_updated_at",
             "user_id",

@@ -71,7 +71,7 @@ from phoenix.server.settings.registry import (
 )
 from phoenix.server.types import DbSessionFactory
 from phoenix.tracers import Tracer, extract_otel_context
-from tests.unit._helpers import _message_uuid
+from tests.unit._helpers import _agent_session_model_kwargs, _message_uuid
 
 _BUILD_MODEL_PATCH_TARGET = "phoenix.server.api.routers.agents.build_model"
 
@@ -110,6 +110,17 @@ def _compact_body() -> dict[str, Any]:
             "provider": "OPENAI",
             "modelName": "gpt-test",
         }
+    }
+
+
+def _create_session_body(**overrides: Any) -> dict[str, Any]:
+    return {
+        "model": {
+            "providerType": "builtin",
+            "provider": "OPENAI",
+            "modelName": "gpt-test",
+        },
+        **overrides,
     }
 
 
@@ -152,6 +163,7 @@ async def _create_agent_session_row(
     does before its first chat request, optionally seeded with a transcript."""
     async with db() as session:
         agent_session = models.AgentSession(
+            **_agent_session_model_kwargs(),
             user_id=None,
             title=title,
             project_name=get_env_phoenix_agents_assistant_project_name(),
@@ -2116,7 +2128,7 @@ async def test_create_session_route_creates_a_temporary_session(
 ) -> None:
     response = await httpx_client.post(
         "/agents/server/sessions",
-        json={"title": " CLI session ", "is_ephemeral": True},
+        json=_create_session_body(title=" CLI session ", is_ephemeral=True),
     )
     assert response.status_code == 201
 
@@ -2129,13 +2141,20 @@ async def test_create_session_route_creates_a_temporary_session(
         assert agent_session.user_id is None
         assert agent_session.project_name == get_env_phoenix_agents_assistant_project_name()
         assert agent_session.is_ephemeral is True
+        assert agent_session.model_provider.value == "OPENAI"
+        assert agent_session.model_name == "gpt-test"
+        assert agent_session.custom_provider_id is None
+        assert agent_session.builtin_provider is not None
 
 
 async def test_create_session_route_defaults_to_a_persistent_untitled_session(
     db: DbSessionFactory,
     httpx_client: httpx.AsyncClient,
 ) -> None:
-    response = await httpx_client.post("/agents/assistant/sessions", json={})
+    response = await httpx_client.post(
+        "/agents/assistant/sessions",
+        json=_create_session_body(),
+    )
     assert response.status_code == 201
 
     global_id = GlobalID.from_id(response.json()["data"]["id"])
@@ -2146,12 +2165,20 @@ async def test_create_session_route_defaults_to_a_persistent_untitled_session(
         assert agent_session.is_ephemeral is False
 
 
+async def test_create_session_route_requires_a_model(
+    httpx_client: httpx.AsyncClient,
+) -> None:
+    response = await httpx_client.post("/agents/assistant/sessions", json={})
+
+    assert response.status_code == 422
+
+
 async def test_create_session_route_rejects_long_title(
     httpx_client: httpx.AsyncClient,
 ) -> None:
     response = await httpx_client.post(
         "/agents/assistant/sessions",
-        json={"title": "x" * (MAX_AGENT_SESSION_TITLE_LENGTH + 1)},
+        json=_create_session_body(title="x" * (MAX_AGENT_SESSION_TITLE_LENGTH + 1)),
     )
 
     assert response.status_code == 422
@@ -2170,7 +2197,7 @@ async def test_create_session_route_yields_a_chattable_session(
 
     created = await httpx_client.post(
         "/agents/server/sessions",
-        json={"is_ephemeral": True},
+        json=_create_session_body(is_ephemeral=True),
     )
     assert created.status_code == 201
 
@@ -2181,10 +2208,47 @@ async def test_create_session_route_yields_a_chattable_session(
     assert response.status_code == 200
 
 
+async def test_chat_stamps_the_selected_model_at_turn_start(
+    db: DbSessionFactory,
+    httpx_client: httpx.AsyncClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def _fake_build_model(*args: object, **kwargs: object) -> TestModel:
+        return TestModel(call_tools=[])
+
+    monkeypatch.setattr(_BUILD_MODEL_PATCH_TARGET, _fake_build_model)
+    agent_session_id = await _create_agent_session_row(db)
+    response = await httpx_client.post(
+        _chat_url(agent_session_id),
+        json=_chat_body(
+            "11111111-1111-4111-8111-111111111111",
+            _user_message("hello"),
+            model={
+                "providerType": "builtin",
+                "provider": "ANTHROPIC",
+                "modelName": "claude-opus-4-6",
+            },
+        ),
+    )
+
+    assert response.status_code == 200
+    global_id = GlobalID.from_id(agent_session_id)
+    async with db() as session:
+        agent_session = await session.get(models.AgentSession, int(global_id.node_id))
+        assert agent_session is not None
+        assert agent_session.model_provider.value == "ANTHROPIC"
+        assert agent_session.model_name == "claude-opus-4-6"
+        assert agent_session.custom_provider_id is None
+        assert agent_session.builtin_provider is not None
+
+
 async def test_create_session_route_rejects_unknown_agents(
     httpx_client: httpx.AsyncClient,
 ) -> None:
-    response = await httpx_client.post("/agents/unknown/sessions", json={})
+    response = await httpx_client.post(
+        "/agents/unknown/sessions",
+        json=_create_session_body(),
+    )
     assert response.status_code == 404
 
 
@@ -2196,7 +2260,10 @@ async def test_create_session_route_is_forbidden_when_agents_are_disabled(
         AgentAssistantEnabledSetting(enabled=False)
     )
 
-    response = await httpx_client.post("/agents/server/sessions", json={})
+    response = await httpx_client.post(
+        "/agents/server/sessions",
+        json=_create_session_body(),
+    )
     assert response.status_code == 403
     assert "Agents are disabled" in response.text
 
@@ -2207,11 +2274,17 @@ async def test_create_session_route_forbids_the_server_agent_when_bash_is_disabl
 ) -> None:
     monkeypatch.setenv("PHOENIX_AGENTS_DISABLE_BASH", "true")
 
-    server_response = await httpx_client.post("/agents/server/sessions", json={})
+    server_response = await httpx_client.post(
+        "/agents/server/sessions",
+        json=_create_session_body(),
+    )
     assert server_response.status_code == 403
     assert "Server agent is disabled" in server_response.text
 
-    assistant_response = await httpx_client.post("/agents/assistant/sessions", json={})
+    assistant_response = await httpx_client.post(
+        "/agents/assistant/sessions",
+        json=_create_session_body(),
+    )
     assert assistant_response.status_code == 201
 
 
@@ -2225,7 +2298,10 @@ async def test_agents_router_is_forbidden_in_read_only_mode(
     agent_session_id = await _create_agent_session_row(db)
     app.state.read_only = True
 
-    create_response = await httpx_client.post("/agents/server/sessions", json={})
+    create_response = await httpx_client.post(
+        "/agents/server/sessions",
+        json=_create_session_body(),
+    )
     assert create_response.status_code == 403
 
     chat_response = await httpx_client.post(

@@ -89,11 +89,6 @@ class CodeEvaluatorContext(TypedDict):
     evaluatorNodeId: NotRequired[str]
 
 
-class CreateAgentSessionRequestBody(TypedDict):
-    title: NotRequired[str]
-    is_ephemeral: NotRequired[bool]
-
-
 class CreateAgentSessionResponseBody(TypedDict):
     data: AgentSession
 
@@ -1740,6 +1735,12 @@ class CompactAgentSessionRequest(TypedDict):
     model: Union[CustomProviderModelSelection, BuiltInProviderModelSelection]
 
 
+class CreateAgentSessionRequestBody(TypedDict):
+    model: Union[CustomProviderModelSelection, BuiltInProviderModelSelection]
+    title: NotRequired[str]
+    is_ephemeral: NotRequired[bool]
+
+
 class CreateAnnotationConfigResponseBody(TypedDict):
     data: Union[CategoricalAnnotationConfig, ContinuousAnnotationConfig, FreeformAnnotationConfig]
 
@@ -1926,6 +1927,8 @@ class AgentSessionData(TypedDict):
     created_at: str
     updated_at: str
     is_ephemeral: bool
+    model: Union[CustomProviderModelSelection, BuiltInProviderModelSelection]
+    custom_provider_deleted: bool
     is_active: bool
     messages: Sequence[PhoenixUIMessage]
 

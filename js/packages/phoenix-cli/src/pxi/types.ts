@@ -89,6 +89,8 @@ export type PxiRuntimeOptions = {
   sessionId: string;
   config: PhoenixConfig;
   modelSelection: ModelSelection;
+  /** Whether model-related CLI flags should override a restored session. */
+  hasExplicitModelSelection: boolean;
   skipModelPreflight: boolean;
   enableWebAccess: boolean;
   enableSubagents: boolean;
@@ -110,6 +112,8 @@ export type PxiSessionSummary = {
 /** A session and its canonical persisted transcript. */
 export type PxiSession = PxiSessionSummary & {
   messages: PxiMessage[];
+  model: ModelSelection;
+  customProviderDeleted: boolean;
   /**
    * Whether another client currently holds the session's server-side lock.
    * Absent means no lock is held.
@@ -129,7 +133,10 @@ export type PxiCompactionResult = {
 
 /** Server-side session operations used by the chat UI. */
 export type PxiSessionClient = {
-  createSession: (options: { temporary: boolean }) => Promise<PxiSession>;
+  createSession: (options: {
+    temporary: boolean;
+    model: ModelSelection;
+  }) => Promise<PxiSession>;
   listSessions: () => Promise<PxiSessionSummary[]>;
   getSession: (options: { sessionId: string }) => Promise<PxiSession>;
   compactSession: (options: {

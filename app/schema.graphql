@@ -81,6 +81,35 @@ type AgentAssistantEnabled {
   enabled: Boolean!
 }
 
+type AgentBuiltinProviderModelSelection {
+  provider: ModelProvider!
+  modelName: String!
+  openaiApiType: OpenAIApiType!
+}
+
+input AgentBuiltinProviderModelSelectionInput {
+  provider: ModelProvider!
+  modelName: String!
+  openaiApiType: OpenAIApiType! = RESPONSES
+}
+
+type AgentCustomProviderModelSelection {
+  providerId: ID!
+  modelName: String!
+}
+
+input AgentCustomProviderModelSelectionInput {
+  providerId: ID!
+  modelName: String!
+}
+
+union AgentModelSelection = AgentCustomProviderModelSelection | AgentBuiltinProviderModelSelection
+
+input AgentModelSelectionInput @oneOf {
+  custom: AgentCustomProviderModelSelectionInput
+  builtin: AgentBuiltinProviderModelSelectionInput
+}
+
 type AgentSession implements Node {
   """The Globally Unique ID of this object"""
   id: ID!
@@ -106,6 +135,8 @@ type AgentSession implements Node {
   Whether a response is currently streaming on this session, i.e. its lock has a live (non-stale) heartbeat.
   """
   isActive: Boolean!
+  model: AgentModelSelection!
+  customProviderDeleted: Boolean!
 
   """The persisted transcript as Vercel AI UIMessage JSON objects."""
   messages: JSON!
@@ -768,6 +799,8 @@ type CostBreakdown {
 }
 
 input CreateAgentSessionInput {
+  model: AgentModelSelectionInput!
+
   """Optional initial title."""
   title: String! = ""
 

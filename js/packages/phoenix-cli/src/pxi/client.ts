@@ -14,6 +14,7 @@ import { createPhoenixClient } from "../client";
 import type { PhoenixConfig } from "../config";
 import { formatPxiRuntimeError } from "./preflight";
 import type {
+  ModelSelection,
   PxiChatClient,
   PxiChatRequest,
   PxiContext,
@@ -114,10 +115,12 @@ async function readErrorDetail({
 export async function createAgentSession({
   config,
   temporary,
+  model,
   fetchImpl,
 }: {
   config: PhoenixConfig;
   temporary: boolean;
+  model: ModelSelection;
   fetchImpl?: typeof globalThis.fetch;
 }): Promise<PxiSession> {
   const client = createPhoenixClient({ config, fetch: fetchImpl });
@@ -125,7 +128,7 @@ export async function createAgentSession({
   try {
     const { data: payload } = await client.POST("/agents/{agent_id}/sessions", {
       params: { path: { agent_id: SERVER_AGENT_ID } },
-      body: { title: "", is_ephemeral: temporary },
+      body: { title: "", is_ephemeral: temporary, model },
     });
     agentSessionId = payload?.data.id;
   } catch (error) {
@@ -148,6 +151,8 @@ export async function createAgentSession({
     updatedAt: new Date().toISOString(),
     isTemporary: temporary,
     messages: [],
+    model,
+    customProviderDeleted: false,
   };
 }
 
@@ -165,8 +170,8 @@ export function createPxiSessionClient({
       ? createOAuthFetch({ config })
       : globalThis.fetch);
   return {
-    createSession: ({ temporary }) =>
-      createAgentSession({ config, temporary, fetchImpl }),
+    createSession: ({ temporary, model }) =>
+      createAgentSession({ config, temporary, model, fetchImpl }),
     async listSessions() {
       const client = createPhoenixClient({ config, fetch: fetchImpl });
       const { data: payload } = await client.GET(
@@ -218,6 +223,8 @@ export function createPxiSessionClient({
         // An absent field means no lock is held.
         isActive: (session as { is_active?: unknown }).is_active === true,
         messages: session.messages as PxiMessage[],
+        model: session.model,
+        customProviderDeleted: session.custom_provider_deleted,
       };
     },
     async compactSession({ sessionId, model }) {
@@ -419,6 +426,7 @@ export function createServerAgentTransport({
     agentSessionIdPromise ??= createAgentSession({
       config: options.config,
       temporary: false,
+      model: options.modelSelection,
       fetchImpl: transportFetch,
     })
       .then((session) => session.id)

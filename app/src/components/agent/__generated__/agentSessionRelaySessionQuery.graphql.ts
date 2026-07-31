@@ -1,5 +1,5 @@
 /**
- * @generated SignedSource<<b0711c282d7d41a0bef57d1a35a79a50>>
+ * @generated SignedSource<<137ab0c7ed4170029e29754ebe1544c3>>
  * @lightSyntaxTransform
  */
 
@@ -8,6 +8,8 @@
 // @ts-nocheck
 
 import { ConcreteRequest } from 'relay-runtime';
+export type ModelProvider = "ANTHROPIC" | "AWS" | "AZURE_OPENAI" | "CEREBRAS" | "DEEPSEEK" | "FIREWORKS" | "GOOGLE" | "GROQ" | "MOONSHOT" | "OLLAMA" | "OPENAI" | "PERPLEXITY" | "TOGETHER" | "XAI";
+export type OpenAIApiType = "CHAT_COMPLETIONS" | "RESPONSES";
 export type agentSessionRelaySessionQuery$variables = {
   id: string;
 };
@@ -15,12 +17,27 @@ export type agentSessionRelaySessionQuery$data = {
   readonly agentSession: {
     readonly __typename: "AgentSession";
     readonly createdAt: string;
+    readonly customProviderDeleted: boolean;
     readonly firstInput: string | null;
     readonly id: string;
     readonly isActive: boolean;
     readonly isTemporary: boolean;
     readonly latestOutput: string | null;
     readonly messages: any;
+    readonly model: {
+      readonly __typename: "AgentBuiltinProviderModelSelection";
+      readonly modelName: string;
+      readonly openaiApiType: OpenAIApiType;
+      readonly provider: ModelProvider;
+    } | {
+      readonly __typename: "AgentCustomProviderModelSelection";
+      readonly modelName: string;
+      readonly providerId: string;
+    } | {
+      // This will never be '%other', but we need some
+      // value in case none of the concrete values match.
+      readonly __typename: "%other";
+    };
     readonly title: string;
     readonly updatedAt: string;
     readonly user: {
@@ -134,6 +151,69 @@ v13 = {
   "alias": null,
   "args": null,
   "kind": "ScalarField",
+  "name": "modelName",
+  "storageKey": null
+},
+v14 = {
+  "alias": null,
+  "args": null,
+  "concreteType": null,
+  "kind": "LinkedField",
+  "name": "model",
+  "plural": false,
+  "selections": [
+    (v2/*:: as any*/),
+    {
+      "kind": "InlineFragment",
+      "selections": [
+        {
+          "alias": null,
+          "args": null,
+          "kind": "ScalarField",
+          "name": "provider",
+          "storageKey": null
+        },
+        (v13/*:: as any*/),
+        {
+          "alias": null,
+          "args": null,
+          "kind": "ScalarField",
+          "name": "openaiApiType",
+          "storageKey": null
+        }
+      ],
+      "type": "AgentBuiltinProviderModelSelection",
+      "abstractKey": null
+    },
+    {
+      "kind": "InlineFragment",
+      "selections": [
+        {
+          "alias": null,
+          "args": null,
+          "kind": "ScalarField",
+          "name": "providerId",
+          "storageKey": null
+        },
+        (v13/*:: as any*/)
+      ],
+      "type": "AgentCustomProviderModelSelection",
+      "abstractKey": null
+    }
+  ],
+  "storageKey": null
+},
+v15 = {
+  "alias": null,
+  "args": null,
+  "kind": "ScalarField",
+  "name": "customProviderDeleted",
+  "storageKey": null
+},
+v16 = {
+  "alias": null,
+  "args": null,
+  "kind": "ScalarField",
   "name": "messages",
   "storageKey": null
 };
@@ -177,7 +257,9 @@ return {
                 ],
                 "storageKey": null
               },
-              (v13/*:: as any*/)
+              (v14/*:: as any*/),
+              (v15/*:: as any*/),
+              (v16/*:: as any*/)
             ],
             "type": "AgentSession",
             "abstractKey": null
@@ -229,7 +311,9 @@ return {
                 ],
                 "storageKey": null
               },
-              (v13/*:: as any*/)
+              (v14/*:: as any*/),
+              (v15/*:: as any*/),
+              (v16/*:: as any*/)
             ],
             "type": "AgentSession",
             "abstractKey": null
@@ -240,16 +324,16 @@ return {
     ]
   },
   "params": {
-    "cacheID": "4836634597c05ab5b6a082d4fa40a454",
+    "cacheID": "ff1c36953bb2c6246c51dd1e0b4ffce9",
     "id": null,
     "metadata": {},
     "name": "agentSessionRelaySessionQuery",
     "operationKind": "query",
-    "text": "query agentSessionRelaySessionQuery(\n  $id: ID!\n) {\n  agentSession: node(id: $id) {\n    __typename\n    ... on AgentSession {\n      id\n      title\n      isTemporary: isEphemeral\n      isActive\n      createdAt\n      updatedAt\n      firstInput\n      latestOutput\n      user {\n        username\n        profilePictureUrl\n        id\n      }\n      messages\n    }\n    id\n  }\n}\n"
+    "text": "query agentSessionRelaySessionQuery(\n  $id: ID!\n) {\n  agentSession: node(id: $id) {\n    __typename\n    ... on AgentSession {\n      id\n      title\n      isTemporary: isEphemeral\n      isActive\n      createdAt\n      updatedAt\n      firstInput\n      latestOutput\n      user {\n        username\n        profilePictureUrl\n        id\n      }\n      model {\n        __typename\n        ... on AgentBuiltinProviderModelSelection {\n          provider\n          modelName\n          openaiApiType\n        }\n        ... on AgentCustomProviderModelSelection {\n          providerId\n          modelName\n        }\n      }\n      customProviderDeleted\n      messages\n    }\n    id\n  }\n}\n"
   }
 };
 })();
 
-(node as any).hash = "898522d8afdc3e0dbb3ef55c2877b2bd";
+(node as any).hash = "36f0e30469a00800044d30a62d7a8e5c";
 
 export default node;

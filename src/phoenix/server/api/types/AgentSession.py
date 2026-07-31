@@ -10,7 +10,11 @@ from strawberry.types import Info
 from phoenix.db import models
 from phoenix.server.api.agent_helpers import CanAccessAgentSession
 from phoenix.server.api.context import Context
-from phoenix.server.api.helpers.agent_sessions import is_turn_active
+from phoenix.server.api.helpers.agent_sessions import get_agent_session_model, is_turn_active
+from phoenix.server.api.types.AgentModelSelection import (
+    AgentModelSelection,
+    to_gql_agent_model_selection,
+)
 
 if TYPE_CHECKING:
     from .User import User
@@ -121,6 +125,18 @@ class AgentSession(Node):
         assert heartbeat_at is None or isinstance(heartbeat_at, datetime)
         return is_turn_active(heartbeat_at, now=datetime.now(timezone.utc))
 
+    @strawberry.field(permission_classes=[CanAccessAgentSession])  # type: ignore
+    async def model(self, info: Info[Context, None]) -> AgentModelSelection:
+        record = await self._load_record(info)
+        model, _ = get_agent_session_model(record)
+        return to_gql_agent_model_selection(model)
+
+    @strawberry.field(permission_classes=[CanAccessAgentSession])  # type: ignore
+    async def custom_provider_deleted(self, info: Info[Context, None]) -> bool:
+        record = await self._load_record(info)
+        _, custom_provider_deleted = get_agent_session_model(record)
+        return custom_provider_deleted
+
     @strawberry.field(
         description="The persisted transcript as Vercel AI UIMessage JSON objects.",
         permission_classes=[CanAccessAgentSession],
@@ -139,6 +155,14 @@ class AgentSession(Node):
                 for message in messages
             ],
         )
+
+    async def _load_record(self, info: Info[Context, None]) -> models.AgentSession:
+        if self.db_record:
+            return self.db_record
+        async with info.context.db.read() as session:
+            record = await session.get(models.AgentSession, self.id)
+        assert record is not None
+        return record
 
 
 def to_gql_agent_session(agent_session: models.AgentSession) -> AgentSession:

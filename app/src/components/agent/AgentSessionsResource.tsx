@@ -2,6 +2,7 @@ import {
   Suspense,
   useCallback,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -28,11 +29,13 @@ import type { AgentPosition } from "@phoenix/store/agentStore";
 import { DRAFT_SESSION_ID } from "@phoenix/store/agentStore";
 import { getErrorMessagesFromRelayMutationError } from "@phoenix/utils/errorUtils";
 
+import { useModelMenuData } from "../generative/useModelMenuData";
 import type { agentSessionRelaySessionQuery } from "./__generated__/agentSessionRelaySessionQuery.graphql";
 import type { AgentSessionsResource_sessions$key } from "./__generated__/AgentSessionsResource_sessions.graphql";
 import type { AgentSessionsResourceDeleteMutation } from "./__generated__/AgentSessionsResourceDeleteMutation.graphql";
 import type { AgentSessionsResourceQuery } from "./__generated__/AgentSessionsResourceQuery.graphql";
 import { AgentChatHeader } from "./AgentChatPanelView";
+import { resolvePersistedAgentModel } from "./agentSessionModel";
 import {
   AGENT_SESSIONS_CONNECTION_KEY,
   SESSION_PAGE_SIZE,
@@ -319,8 +322,9 @@ function AgentSessionsContent({
     () =>
       activeSessionId != null &&
       activeSessionId !== DRAFT_SESSION_ID &&
-      runtime.getChat(activeSessionId) == null,
-    [activeSessionId, runtime]
+      (runtime.getChat(activeSessionId) == null ||
+        store.getState().modelConfigBySessionId[activeSessionId] == null),
+    [activeSessionId, runtime, store]
   );
 
   return (
@@ -410,6 +414,29 @@ function AgentSessionTranscript({
         : [],
     [agentSession?.messages]
   );
+  const store = useAgentStore();
+  const { availableBuiltinModels, customProviders } = useModelMenuData();
+  useLayoutEffect(() => {
+    if (!agentSession) {
+      return;
+    }
+    const state = store.getState();
+    const model =
+      agentSession.model.__typename === "AgentBuiltinProviderModelSelection" ||
+      agentSession.model.__typename === "AgentCustomProviderModelSelection"
+        ? resolvePersistedAgentModel({
+            model: agentSession.model,
+            availableBuiltinModels,
+            customProviders,
+            fallback: state.defaultModelConfig,
+          })
+        : state.defaultModelConfig;
+    state.setSessionModelConfig(
+      sessionId,
+      model,
+      agentSession.customProviderDeleted
+    );
+  }, [agentSession, availableBuiltinModels, customProviders, sessionId, store]);
   useEffect(() => {
     if (!agentSession) {
       onMissing(sessionId);
@@ -438,7 +465,10 @@ function AgentChatController({
   /** Relay-derived: another client's turn holds the session's server lock. */
   isActive?: boolean;
 }) {
-  const { menuValue, handleModelChange } = useAgentChatPanelState();
+  const { menuValue, handleModelChange } = useAgentChatPanelState(sessionId);
+  const customProviderDeleted = useAgentContext(
+    (state) => state.customProviderDeletedBySessionId[sessionId] ?? false
+  );
   const {
     messages,
     sendMessage,
@@ -482,6 +512,11 @@ function AgentChatController({
       forkFromMessage={forkFromMessage}
       modelMenuValue={menuValue}
       onModelChange={handleModelChange}
+      modelFallbackNotice={
+        customProviderDeleted
+          ? "The custom provider saved for this session was deleted. Phoenix is using an available fallback model."
+          : null
+      }
       autoFocusInput
     >
       <ChatSessionUsage messages={messages} />

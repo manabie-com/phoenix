@@ -139,6 +139,22 @@ class ModelProvider(Enum):
     TOGETHER = "TOGETHER"
 
 
+def model_provider_from_generative_model_sdk(
+    sdk: "GenerativeModelSDK",
+) -> ModelProvider:
+    if sdk == "openai":
+        return ModelProvider.OPENAI
+    if sdk == "azure_openai":
+        return ModelProvider.AZURE_OPENAI
+    if sdk == "anthropic":
+        return ModelProvider.ANTHROPIC
+    if sdk == "google_genai":
+        return ModelProvider.GOOGLE
+    if sdk == "aws_bedrock":
+        return ModelProvider.AWS
+    assert_never(sdk)
+
+
 def is_sdk_compatible_with_model_provider(
     sdk: "GenerativeModelSDK",
     model_provider: ModelProvider,

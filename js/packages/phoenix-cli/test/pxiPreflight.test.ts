@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import { resolvePxiRuntimeOptions } from "../src/pxi/options";
 import {
   getRecommendedPxiModels,
+  resolveRestoredPxiModelSelection,
   runPxiModelPreflight,
 } from "../src/pxi/preflight";
 
@@ -103,6 +104,66 @@ function createFetch({
 }
 
 describe("PXI model preflight", () => {
+  it("uses a valid persisted model when no model flags were provided", async () => {
+    const options = createRuntimeOptions({
+      provider: undefined,
+      model: undefined,
+    });
+    const persistedModel = {
+      providerType: "builtin",
+      provider: "OPENAI",
+      modelName: "gpt-5.4",
+    } as const;
+    const { fetchImpl } = createFetch({
+      body: { data: createPreflightData() },
+    });
+
+    await expect(
+      resolveRestoredPxiModelSelection({
+        options,
+        persistedModelSelection: persistedModel,
+        fetchImpl,
+      })
+    ).resolves.toEqual(persistedModel);
+  });
+
+  it("keeps explicit model flags when restoring a session", async () => {
+    const options = createRuntimeOptions();
+
+    await expect(
+      resolveRestoredPxiModelSelection({
+        options,
+        persistedModelSelection: {
+          providerType: "builtin",
+          provider: "GOOGLE",
+          modelName: "gemini-3.5-flash",
+        },
+      })
+    ).resolves.toEqual(options.modelSelection);
+  });
+
+  it("falls back to the CLI default when the persisted model is invalid", async () => {
+    const options = createRuntimeOptions({
+      provider: undefined,
+      model: undefined,
+    });
+    const { fetchImpl } = createFetch({
+      body: { data: createPreflightData() },
+    });
+
+    await expect(
+      resolveRestoredPxiModelSelection({
+        options,
+        persistedModelSelection: {
+          providerType: "builtin",
+          provider: "OPENAI",
+          modelName: "missing-model",
+        },
+        fetchImpl,
+      })
+    ).resolves.toEqual(options.modelSelection);
+  });
+
   it("returns available recommended models in the main app's curated order", () => {
     const models = getRecommendedPxiModels({
       data: createPreflightData({
