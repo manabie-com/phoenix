@@ -8,12 +8,12 @@ from sqlalchemy import select
 
 from phoenix.db import models
 from phoenix.db.types.media import MediaContent
-from phoenix.db.types.prompts import (
-    PromptChatTemplate,
-)
 from phoenix.db.types.media_parts import (
     ImageContentPart,
     media_variable_names,
+)
+from phoenix.db.types.prompts import (
+    PromptChatTemplate,
 )
 from phoenix.server.types import DbSessionFactory
 from tests.unit.graphql import AsyncGraphQLClient
