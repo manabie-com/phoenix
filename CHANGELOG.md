@@ -1,5 +1,38 @@
 # Changelog
 
+## [19.13.0](https://github.com/Arize-ai/phoenix/compare/arize-phoenix-v19.12.0...arize-phoenix-v19.13.0) (2026-08-01)
+
+
+### Features
+
+* **app:** include span and trace annotations in span exports ([#14990](https://github.com/Arize-ai/phoenix/issues/14990)) ([f9fa685](https://github.com/Arize-ai/phoenix/commit/f9fa685617e8a7c55f4b61dd0db6a09969fe7f26))
+* **experiments:** lift metric chart selection limit ([#14987](https://github.com/Arize-ai/phoenix/issues/14987)) ([6f647cb](https://github.com/Arize-ai/phoenix/commit/6f647cb546474170c1e5c29c6e13cd4f4c12fd42))
+
+## [19.12.0](https://github.com/Arize-ai/phoenix/compare/arize-phoenix-v19.11.1...arize-phoenix-v19.12.0) (2026-07-31)
+
+
+### Features
+
+* **evals:** harbor poc ([#14195](https://github.com/Arize-ai/phoenix/issues/14195)) ([24ff59b](https://github.com/Arize-ai/phoenix/commit/24ff59bd3947d54e909d1baee188b01ed9817a92))
+
+
+### Bug Fixes
+
+* **dsl:** one NUL message on every Python ([#14963](https://github.com/Arize-ai/phoenix/issues/14963)) ([1717c4c](https://github.com/Arize-ai/phoenix/commit/1717c4cae2fa030c58446088be26c5d6cb1fe020))
+
+
+### Documentation
+
+* Add Phoenix release notes — 2026-07-29 ([#14853](https://github.com/Arize-ai/phoenix/issues/14853)) ([ae690e1](https://github.com/Arize-ai/phoenix/commit/ae690e141623982f295d07950529d9649cbf8b63))
+
+## [19.11.1](https://github.com/Arize-ai/phoenix/compare/arize-phoenix-v19.11.0...arize-phoenix-v19.11.1) (2026-07-31)
+
+
+### Bug Fixes
+
+* **cost:** update built-in model token prices ([#14946](https://github.com/Arize-ai/phoenix/issues/14946)) ([7d8b917](https://github.com/Arize-ai/phoenix/commit/7d8b917ff141290ef2bd0fd13dcada5a5d5759bd))
+* harden span filter validation ([#14295](https://github.com/Arize-ai/phoenix/issues/14295)) ([367a342](https://github.com/Arize-ai/phoenix/commit/367a3421986df279c849c2c1c09d5948e7e51e3b))
+
 ## [19.11.0](https://github.com/Arize-ai/phoenix/compare/arize-phoenix-v19.10.0...arize-phoenix-v19.11.0) (2026-07-30)
 
 
