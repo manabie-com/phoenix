@@ -26,13 +26,21 @@ three-line delegation that git can auto-merge, never an interleaved block.
 Measure it before and after any change to the fork's structure:
 
 ```bash
+git fetch upstream          # do this first, always — see below
 # lines in files upstream owns  = the whole conflict surface
 # lines in files only we have   = cannot conflict
 git diff --numstat upstream/main
 ```
 
-At the time of writing, 79% of the fork's hand-written lines sit in fork-only files.
-Keep that ratio going up, not down.
+**Fetch first.** A stale `upstream/main` makes every number a measurement against a
+baseline that no longer exists, and the failure is quiet: files upstream changed show up
+as though the fork had changed them. The tell is a file in the diff that the fork has no
+business touching — check `git log upstream/main..HEAD -- <path>` before believing it.
+
+At the time of writing, 93% of the fork's hand-written lines sit in fork-only files: 8,457
+there against 618 spread over 30 files upstream owns. Keep that ratio going up. Generated
+artifacts are excluded from both counts — codegen reproduces them, so they are noise here
+even though they are the largest part of the raw diff.
 
 ## Runbook
 
@@ -46,12 +54,20 @@ Then verify, in this order — cheapest and most diagnostic first:
 ```bash
 uv run pytest tests/unit/db/test_migration_heads.py    # would the server even boot?
 make typecheck-python && (cd app && pnpm typecheck)
+make format-python && make lint-python && git diff --exit-code   # what CI actually gates on
 uv run pytest tests/unit/server/api/helpers tests/unit/db -q
 cd app && pnpm vitest run
 ```
 
-Only then `git commit`. `make sync-fork` deliberately leaves the merge uncommitted so it
-can be reviewed before it becomes history.
+The third line is not optional and is easy to get wrong. CI's "Format and Lint" job runs
+`make format-python`, then `make lint-python`, then `git diff --exit-code` — and
+`format-python` does **not** sort imports. Only `lint-python` (`ruff check --fix`) does, and
+only repo-wide: a `ruff check` scoped to one directory will pass while five other files are
+unsorted. A scripted import rewrite once left six such files, all of which passed locally
+and failed CI on the `git diff` step.
+
+`make sync-fork` deliberately leaves the merge uncommitted so it can be reviewed before it
+becomes history. Committing and pushing are the user's calls — do not do either unasked.
 
 `git rerere` is enabled, so any resolution made once is replayed automatically next time.
 Do not disable it.
@@ -126,17 +142,62 @@ it does, decide which kind of document it is:
    refuses to start. Back the database up, then stamp it at the surviving revision.
 3. **There is no Python reloader.** Restart the backend after backend changes, and tell the
    user to re-attach their debugger — the dev server runs under `debugpy`.
-4. **Keep the branch to one concern.** Do not fold unrelated fixes into it. That single
-   rule has prevented more conflict than every structural change combined.
+4. **`pnpm lint:fix` edits a file the fork has no business touching.** It strips nine
+   duplicate `orange-*` members from upstream's `app/src/components/core/types/style.ts`.
+   Harmless — the tokens are declared earlier in the same union — but it is an unrelated
+   *deletion* inside an upstream file, the shape git merges worst. Revert it
+   (`git checkout upstream/main -- <path>`) and never let `git add -A` sweep it in.
+5. **Keep the branch to one concern.** Do not fold unrelated fixes into it. That single
+   rule has prevented more conflict than every structural change combined — an unrelated
+   `SpanDetails` fix once caused 100% of a sync's conflicts, on a bug upstream had already
+   fixed more cleanly seventeen hours earlier.
+
+## Running the Playwright suite against a sync
+
+Worth doing after a sync, because it is the only layer that exercises real Relay data in a
+browser — see the `@inline` hazard in the playbook for what the other layers miss.
+
+```bash
+cd app && pnpm build          # the harness serves the built app, not the dev server
+PHOENIX_PORT=6020 PHOENIX_GRPC_PORT=14320 \
+  pnpm playwright test tests/prompt-management.spec.ts tests/playground.spec.ts \
+  --project=chromium --reporter=list
+```
+
+Both ports must be overridden. `baseURL` defaults to port 6006 with
+`reuseExistingServer` true locally, so a bare run points Playwright at the developer's own
+dev server — which has no auth, so the login setup fails — and the test harness also binds
+gRPC 4317, which that server already holds. Chromium may need `pnpm exec playwright install
+chromium` first; Firefox and WebKit are usually absent, so pass `--project=chromium`.
 
 ## Adding to the fork
 
 When the sync is done and there is new fork work to write, put it in fork-owned paths:
 
-- backend media handling → `src/phoenix/server/api/helpers/playground_media/` (a module
+- provider media handling → `src/phoenix/server/api/helpers/playground_media/` (a module
   per provider, `__init__.py` re-exporting);
+- media content parts and their ORM conversion → `src/phoenix/db/types/media_parts.py`,
+  `src/phoenix/server/api/input_types/MediaContentInput.py`;
+- media inside a playground message → `src/phoenix/server/api/helpers/message_media.py`;
+- the shared GraphQL media selection and its readers →
+  `app/src/utils/mediaContentPartFragment.ts`;
+- playground media state and controls → `app/src/pages/playground/playgroundMedia.ts`,
+  `app/src/pages/playground/media/`;
+- prompt and trace rendering → `app/src/components/prompt/media/`,
+  `app/src/pages/trace/span/media/`;
 - leave only a one-to-three-line call in the upstream file.
+
+Tests go in new files too, rather than into upstream's. A fork assertion added to an
+upstream test file conflicts on every upstream edit to that file, for no benefit —
+`test_message_media.py` and `getChatCompletionInputMedia.test.ts` exist for exactly that
+reason.
 
 If a block of fork logic has to be duplicated across upstream files, extract it instead.
 Duplication is worse than its line count suggests: a merge can fix one copy and leave the
 other stale, with no test failing.
+
+The one place this needs care rather than enthusiasm is a shared **GraphQL selection**. The
+`@inline` fragment above is the right structure — it is what keeps five spread sites down to
+one line each — but the deduplication changes how the data arrives at runtime, and getting
+that wrong fails silently in a way nothing catches. Read the `@inline` section of the
+playbook before touching it.
