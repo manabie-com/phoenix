@@ -8,6 +8,9 @@ from typing_extensions import TypeAlias, assert_never
 
 from phoenix.db.models import PromptVersion as ORMPromptVersion
 from phoenix.db.types.media import MediaContent as MediaContentModel
+from phoenix.db.types.media_parts import (
+    media_source,
+)
 from phoenix.db.types.prompts import (
     PromptChatTemplate as PromptChatTemplateModel,
 )
@@ -16,9 +19,6 @@ from phoenix.db.types.prompts import (
     PromptMessageRole,
     PromptTemplateType,
     RoleConversion,
-)
-from phoenix.db.types.media_parts import (
-    media_source,
 )
 from phoenix.db.types.prompts import (
     PromptStringTemplate as PromptStringTemplateModel,

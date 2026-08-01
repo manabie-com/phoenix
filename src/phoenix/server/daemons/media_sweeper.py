@@ -16,13 +16,13 @@ from phoenix.db.types.media import (
     MediaContent,
     parse_media_url,
 )
-from phoenix.db.types.prompts import (
-    PromptChatTemplate,
-    PromptTemplate,
-)
 from phoenix.db.types.media_parts import (
     is_media_content_part,
     media_source,
+)
+from phoenix.db.types.prompts import (
+    PromptChatTemplate,
+    PromptTemplate,
 )
 from phoenix.server.types import DaemonTask, DbSessionFactory
 

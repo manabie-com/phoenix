@@ -13,14 +13,14 @@ from phoenix.db.types.media import (
     hosted_media_url,
     parse_media_url,
 )
+from phoenix.db.types.media_parts import (
+    ImageContentPart,
+    media_variable_names,
+)
 from phoenix.db.types.prompts import (
     PromptChatTemplate,
     PromptMessage,
     TextContentPart,
-)
-from phoenix.db.types.media_parts import (
-    ImageContentPart,
-    media_variable_names,
 )
 
 _DIGEST = "a" * 64
