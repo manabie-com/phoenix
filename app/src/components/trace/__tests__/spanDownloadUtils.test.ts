@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { authApiFetch } from "@phoenix/api/authApiFetch";
+import { mockedApiGet } from "@phoenix/api/__fixtures__/mockedApiGet";
 
 import {
   downloadSingleSpan,
@@ -8,7 +9,6 @@ import {
   getSpanDownloadTimestamp,
   sanitizeSpanDownloadFileName,
 } from "../spanDownloadUtils";
-import { mockSpansPageOnce } from "./__fixtures__/mockSpansPage";
 
 vi.mock("@phoenix/api/authApiFetch", () => ({
   authApiFetch: {
@@ -75,7 +75,10 @@ describe("spanDownloadUtils", () => {
       end_time: "2026-07-24T18:30:46Z",
       status_code: "OK",
     };
-    mockSpansPageOnce([span]);
+    mockedApiGet().mockResolvedValueOnce({
+      data: { data: [span], next_cursor: null },
+      response: new Response(null, { status: 200 }),
+    });
 
     await downloadSingleSpan({
       projectId: "project-id",
@@ -103,7 +106,10 @@ describe("spanDownloadUtils", () => {
 
   it("wraps a single OTLP span in the OTLP JSON envelope", async () => {
     const otlpSpan = { span_id: "span-id", trace_id: "trace-id" };
-    mockSpansPageOnce([otlpSpan]);
+    mockedApiGet().mockResolvedValueOnce({
+      data: { data: [otlpSpan], next_cursor: null },
+      response: new Response(null, { status: 200 }),
+    });
 
     await downloadSingleSpan({
       projectId: "project-id",
@@ -171,9 +177,19 @@ describe("spanDownloadUtils", () => {
       identifier: "",
       trace_id: "trace-id",
     };
-    mockSpansPageOnce([span]);
-    mockSpansPageOnce([spanAnnotation]);
-    mockSpansPageOnce([traceAnnotation]);
+    mockedApiGet()
+      .mockResolvedValueOnce({
+        data: { data: [span], next_cursor: null },
+        response: new Response(null, { status: 200 }),
+      })
+      .mockResolvedValueOnce({
+        data: { data: [spanAnnotation], next_cursor: null },
+        response: new Response(null, { status: 200 }),
+      })
+      .mockResolvedValueOnce({
+        data: { data: [traceAnnotation], next_cursor: null },
+        response: new Response(null, { status: 200 }),
+      });
 
     await downloadSpanCollection({
       projectId: "project-id",
@@ -266,9 +282,19 @@ describe("spanDownloadUtils", () => {
       identifier: "",
       trace_id: "trace-id",
     };
-    mockSpansPageOnce([otlpSpan]);
-    mockSpansPageOnce([spanAnnotation]);
-    mockSpansPageOnce([traceAnnotation]);
+    mockedApiGet()
+      .mockResolvedValueOnce({
+        data: { data: [otlpSpan], next_cursor: null },
+        response: new Response(null, { status: 200 }),
+      })
+      .mockResolvedValueOnce({
+        data: { data: [spanAnnotation], next_cursor: null },
+        response: new Response(null, { status: 200 }),
+      })
+      .mockResolvedValueOnce({
+        data: { data: [traceAnnotation], next_cursor: null },
+        response: new Response(null, { status: 200 }),
+      });
 
     await downloadSpanCollection({
       projectId: "project-id",
@@ -357,8 +383,15 @@ describe("spanDownloadUtils", () => {
       identifier: "",
       trace_id: "trace-id",
     };
-    mockSpansPageOnce([childSpan, rootSpan]);
-    mockSpansPageOnce([traceAnnotation]);
+    mockedApiGet()
+      .mockResolvedValueOnce({
+        data: { data: [childSpan, rootSpan], next_cursor: null },
+        response: new Response(null, { status: 200 }),
+      })
+      .mockResolvedValueOnce({
+        data: { data: [traceAnnotation], next_cursor: null },
+        response: new Response(null, { status: 200 }),
+      });
 
     await downloadSpanCollection({
       projectId: "project-id",

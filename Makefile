@@ -38,7 +38,7 @@ NC := \033[0m # No Color
 	format format-python format-frontend format-ts lint lint-python lint-frontend lint-ts clean-notebooks \
 	build build-python build-frontend build-ts \
 	codegen-prompts sync-models schema-ddl check-graphql-permissions gen-otel-models \
-	gh-comment-watch sync-fork sync-fork-check \
+	gh-comment-watch \
 	harbor-stage-environments harbor-publish-fixtures harbor-oracle harbor-run harbor-view \
 	clean clean-all
 
@@ -433,18 +433,6 @@ gh-comment-watch: ## Start the GitHub comment watcher
 	cd $(GH_COMMENT_WATCH_DIR) && $(PNPM) start
 
 #=============================================================================
-# Fork maintenance
-#=============================================================================
-
-sync-fork-check: ## Report what syncing with upstream would conflict on (changes nothing)
-	@$(UV) run python scripts/sync_fork.py --check
-
-sync-fork: ## Merge upstream, regenerate generated files, re-point migrations
-	@echo -e "$(CYAN)Syncing with upstream...$(NC)"
-	@$(UV) run python scripts/sync_fork.py
-	@echo -e "$(GREEN)✓ Merge staged — review, run tests, then commit$(NC)"
-
-#=============================================================================
 # Harbor Evals
 #=============================================================================
 
@@ -522,3 +510,6 @@ clean-all: clean ## Clean everything including node_modules
 	@find $(JS_DIR) -type d -name "node_modules" -exec rm -rf {} + 2>/dev/null || true
 	@rm -rf .venv
 	@echo -e "$(GREEN)✓ Done$(NC)"
+
+# Fork-only targets. Keep this last — see mk/fork.mk.
+-include mk/fork.mk
