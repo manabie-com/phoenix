@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { authApiFetch } from "@phoenix/api/authApiFetch";
 import { mockedApiGet } from "@phoenix/api/__fixtures__/mockedApiGet";
+import { authApiFetch } from "@phoenix/api/authApiFetch";
 
 import {
   downloadSingleSpan,
