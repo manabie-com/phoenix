@@ -2428,6 +2428,20 @@ def _ensure_endpoint_coverage_is_exhaustive() -> None:
         raise AssertionError("Endpoint coverage is incomplete!\n\n" + "\n\n".join(error_parts))
 
 
+# Fork-only routes are declared in a fork-owned module, so the coverage constants above
+# stay byte-identical to upstream's. See tests/integration/_fork_endpoints.py.
+from ._fork_endpoints import (  # noqa: E402
+    FORK_COMMON_RESOURCE_ENDPOINTS,
+    FORK_VIEWER_BLOCKED_WRITE_OPERATIONS,
+)
+
+# The ignores are unavoidable rather than sloppy: mypy infers these constants as
+# fixed-length heterogeneous tuples, so appending widens the type and no longer
+# matches. Annotating them `tuple[tuple[int, str, str], ...]` would fix it, but only
+# by editing upstream's declarations -- the exact conflict this indirection avoids.
+_COMMON_RESOURCE_ENDPOINTS += FORK_COMMON_RESOURCE_ENDPOINTS  # type: ignore[assignment]
+_VIEWER_BLOCKED_WRITE_OPERATIONS += FORK_VIEWER_BLOCKED_WRITE_OPERATIONS  # type: ignore[assignment]
+
 _ensure_endpoint_coverage_is_exhaustive()
 
 
