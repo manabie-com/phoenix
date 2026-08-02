@@ -27,6 +27,12 @@ name: Pre-merge
 #
 # If any of those becomes relevant, add the job here rather than re-enabling the
 # upstream workflow: re-enabling brings back the runner and secret problems.
+#
+# Three suites live in post-merge.yml instead of this gate, because their cost on a
+# standard hosted runner outweighed their value as a merge blocker: Python Unit
+# Tests (sqlite and postgresql) and Playwright E2E. The PostgreSQL leg exceeded 90
+# minutes and Playwright exceeded 60. A regression only those suites catch now
+# reaches `main` and is found after the fact -- watch Post-merge accordingly.
 
 permissions:
   contents: read
@@ -217,59 +223,6 @@ jobs:
         run: make codegen-prompts
       - name: Fail if any generated artifact is stale
         run: git diff --exit-code
-
-  python-unit-tests:
-    name: Python Unit Tests (${{ matrix.db }})
-    runs-on: ubuntu-latest
-    needs: changes
-    if: ${{ needs.changes.outputs.approved == 'true' && needs.changes.outputs.python == 'true' }}
-    strategy:
-      fail-fast: false
-      matrix:
-        db: [sqlite, postgresql]
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-        with:
-          persist-credentials: false
-      - name: Set up Python
-        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
-        with:
-          python-version: "3.10"
-      - name: Set up `uv`
-        uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7.6.0
-        with:
-          version: ${{ env.UV_VERSION }}
-      # Upstream's python-CI runs the PostgreSQL leg too, but its job requires the
-      # `oss-4-core-runner` self-hosted label, which this fork has no runner for, so
-      # it queues forever and never reports. Mirrored here on ubuntu-latest so the
-      # fork's own gate covers both dialects. The floor version comes from PGDG
-      # rather than whatever Ubuntu ships, matching upstream: the DSL suites assert
-      # cross-dialect guarantees that must hold on the oldest supported PostgreSQL.
-      - name: Install PostgreSQL (product floor)
-        if: matrix.db == 'postgresql'
-        run: |
-          sudo apt-get -yqq install postgresql-common
-          sudo /usr/share/postgresql-common/pgdg/apt.postgresql.org.sh -y
-          sudo apt-get -yqq install postgresql-14
-      # Upstream's `-n 16` does not transfer to a standard hosted runner. Measured
-      # on this fork:
-      #   -n auto (4): SQLite passed in 28m; PostgreSQL exceeded a 45m timeout
-      #   -n 16:       SQLite runner killed at 29m (SIGTERM, no speed gain at all)
-      # So the suite is not starved of workers here -- it is memory-bound, and
-      # oversubscribing only gets the runner VM reclaimed. Keep `-n auto` and buy
-      # time with the timeout instead. Raise workers only with evidence.
-      - name: Run unit tests (SQLite)
-        if: matrix.db == 'sqlite'
-        timeout-minutes: 90
-        run: uvx tox run -e unit_tests -- -ra --reruns 5 -n auto --dist loadscope
-      - name: Run unit tests (PostgreSQL)
-        if: matrix.db == 'postgresql'
-        timeout-minutes: 90
-        run: >-
-          uvx tox run -e unit_tests --
-          -ra --reruns 5 --db postgresql -n auto --dist loadscope
-          --postgresql-exec /usr/lib/postgresql/14/bin/pg_ctl
 
   typescript-app:
     name: Frontend Lint, Type Check & Tests
@@ -643,95 +596,6 @@ jobs:
         with:
           args: --fail-on-incompatible base.json head.json
 
-  e2e-tests:
-    name: Playwright E2E
-    runs-on: ubuntu-latest
-    timeout-minutes: 60
-    needs: changes
-    if: ${{ needs.changes.outputs.approved == 'true' && needs.changes.outputs.e2e == 'true' }}
-    defaults:
-      run:
-        working-directory: ./app
-    env:
-      # WebKit's deps can't be cached and Firefox is not exercised by the suite.
-      CI_PLAYWRIGHT_SKIP_WEBKIT: true
-    steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-        with:
-          persist-credentials: false
-      - name: Install PNPM
-        uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v5.0.0
-        with:
-          package_json_file: app/package.json
-      - name: Use Node.js
-        uses: actions/setup-node@53b83947a5a98c8d113130e565377fae1a50d02f # v6.3.0
-        with:
-          cache-dependency-path: ./app/pnpm-lock.yaml
-          node-version-file: .nvmrc
-          cache: pnpm
-      - name: Install dependencies
-        run: pnpm install --frozen-lockfile
-      - name: Get installed Playwright version
-        run: echo "PLAYWRIGHT_VERSION=$(pnpm list --json | jq -r '.[0].devDependencies["@playwright/test"].version')" >> "$GITHUB_ENV"
-      - name: Cache Playwright binaries
-        uses: actions/cache@668228422ae6a00e4ad889ee87cd7109ec5666a7 # v5.0.4
-        id: playwright-cache
-        with:
-          path: ~/.cache/ms-playwright
-          key: ${{ runner.os }}-playwright-${{ env.PLAYWRIGHT_VERSION }}-${{ hashFiles('app/playwright.config.ts') }}
-      # Chromium only, matching the --project filter on the run step below.
-      - name: Install Playwright browsers
-        if: steps.playwright-cache.outputs.cache-hit != 'true'
-        run: pnpm exec playwright install --with-deps chromium
-      - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
-        with:
-          python-version: "3.14"
-      - uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7.6.0
-        with:
-          version: ${{ env.UV_VERSION }}
-      - name: Sync Python dependencies
-        working-directory: ${{ github.workspace }}
-        run: uv sync --extra container
-      # Sandbox providers the suite needs. The Phoenix container image bundles
-      # these; a bare runner does not, so pin the same versions and surface them
-      # through the same env-var contract ensure_wasm_binary() / DenoAdapter use.
-      - name: Install Deno (TypeScript sandbox provider)
-        uses: denoland/setup-deno@e95548e56dfa95d4e1a28d6f422fafe75c4c26fb # v2.0.3
-        with:
-          deno-version: v2.1.4
-      - name: Pre-download CPython WASM binary
-        working-directory: ${{ github.workspace }}
-        # URL/filename/sha256 MUST stay in sync with
-        # src/phoenix/server/sandbox/_download.py.
-        run: |
-          mkdir -p .cache/wasm
-          python -c "import hashlib, sys, urllib.request; \
-          url = 'https://github.com/vmware-labs/webassembly-language-runtimes/releases/download/python%2F3.12.0%2B20231211-040d5a6/python-3.12.0.wasm'; \
-          dest = '.cache/wasm/python-3.12.0.wasm'; \
-          expected = 'e5dc5a398b07b54ea8fdb503bf68fb583d533f10ec3f930963e02b9505f7a763'; \
-          urllib.request.urlretrieve(url, dest); \
-          actual = hashlib.sha256(open(dest, 'rb').read()).hexdigest(); \
-          (actual == expected) or sys.exit(f'SHA-256 mismatch for {dest}: expected {expected}, got {actual}')"
-          echo "PHOENIX_WASM_BINARY_PATH=${{ github.workspace }}/.cache/wasm/python-3.12.0.wasm" >> "$GITHUB_ENV"
-      # Chromium only. playwright.config.ts also defines a firefox project, but on a
-      # standard hosted runner (2 Playwright workers) the two-browser suite produced
-      # no result at all inside 60 minutes, where chromium alone finishes in ~11. The
-      # earlier "passing" 14-minute run was an illusion: firefox was not installed, so
-      # every firefox spec failed instantly on a missing binary and cost nothing.
-      #
-      # This is a deliberate narrowing of the gate, not a fix for whatever makes
-      # firefox slow here. Chromium is the browser the fork's media UI is developed
-      # against; revisit with `--project=firefox` on a schedule if that coverage is
-      # wanted, rather than putting an hour back into every labelled PR.
-      - name: Run Playwright tests
-        run: pnpm test:e2e --project=chromium
-      - uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
-        if: always()
-        with:
-          name: playwright-report
-          path: app/playwright-report/
-          retention-days: 30
-
   pre-merge:
     name: Pre-merge
     runs-on: ubuntu-latest
@@ -741,7 +605,6 @@ jobs:
       - python-lint
       - python-typecheck
       - python-schemas
-      - python-unit-tests
       - python-doctests
       - python-integration-tests
       - python-migrations
@@ -752,7 +615,6 @@ jobs:
       - actions-security
       - package-versions
       - openapi-compat
-      - e2e-tests
     steps:
       - name: Require the "Ok to test" label
         if: ${{ needs.changes.outputs.approved != 'true' }}
