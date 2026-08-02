@@ -252,20 +252,23 @@ jobs:
           sudo apt-get -yqq install postgresql-common
           sudo /usr/share/postgresql-common/pgdg/apt.postgresql.org.sh -y
           sudo apt-get -yqq install postgresql-14
-      # `-n 16` on a 4-core runner is deliberate, and copied from upstream: these
-      # tests block on database round trips rather than CPU, so oversubscribing
-      # cores is what keeps the suite inside its timeout. `-n auto` (4 workers here)
-      # was tried and timed out the PostgreSQL leg at 45m while SQLite took 28m.
+      # Upstream's `-n 16` does not transfer to a standard hosted runner. Measured
+      # on this fork:
+      #   -n auto (4): SQLite passed in 28m; PostgreSQL exceeded a 45m timeout
+      #   -n 16:       SQLite runner killed at 29m (SIGTERM, no speed gain at all)
+      # So the suite is not starved of workers here -- it is memory-bound, and
+      # oversubscribing only gets the runner VM reclaimed. Keep `-n auto` and buy
+      # time with the timeout instead. Raise workers only with evidence.
       - name: Run unit tests (SQLite)
         if: matrix.db == 'sqlite'
-        timeout-minutes: 60
-        run: uvx tox run -e unit_tests -- -ra --reruns 5 -n 16 --dist loadscope
+        timeout-minutes: 90
+        run: uvx tox run -e unit_tests -- -ra --reruns 5 -n auto --dist loadscope
       - name: Run unit tests (PostgreSQL)
         if: matrix.db == 'postgresql'
-        timeout-minutes: 60
+        timeout-minutes: 90
         run: >-
           uvx tox run -e unit_tests --
-          -ra --reruns 5 --db postgresql -n 16 --dist loadscope
+          -ra --reruns 5 --db postgresql -n auto --dist loadscope
           --postgresql-exec /usr/lib/postgresql/14/bin/pg_ctl
 
   typescript-app:
@@ -422,11 +425,14 @@ jobs:
         uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7.6.0
         with:
           version: ${{ env.UV_VERSION }}
-      # `-n 16` matches upstream. See the unit-test job for why oversubscribing a
-      # 4-core runner is correct here rather than `-n auto`.
+      # Every integration worker launches a full Phoenix server, so this is the
+      # most memory-hungry suite in the gate. At upstream's `-n 16` both legs had
+      # their runner VMs reclaimed ~6 minutes in ("The runner has received a
+      # shutdown signal"). `-n auto` for the same reason as the unit suite: a
+      # reclaimed runner costs a whole hour, a slow run only costs minutes.
       - name: Run integration tests
-        timeout-minutes: 45
-        run: uvx tox run -e integration_tests -- -ra --reruns 5 -n 16
+        timeout-minutes: 90
+        run: uvx tox run -e integration_tests -- -ra --reruns 5 -n auto
 
   python-migrations:
     name: DB Migration Continuity (${{ matrix.db }}${{ matrix.concurrently && ', concurrently' || '' }})
@@ -673,13 +679,10 @@ jobs:
         with:
           path: ~/.cache/ms-playwright
           key: ${{ runner.os }}-playwright-${{ env.PLAYWRIGHT_VERSION }}-${{ hashFiles('app/playwright.config.ts') }}
-      # Both browsers, not just chromium: playwright.config.ts defines a firefox
-      # project as well, and only WebKit is dropped (via CI_PLAYWRIGHT_SKIP_WEBKIT).
-      # Installing chromium alone failed every firefox spec with
-      # "browserType.launch: Executable doesn't exist".
+      # Chromium only, matching the --project filter on the run step below.
       - name: Install Playwright browsers
         if: steps.playwright-cache.outputs.cache-hit != 'true'
-        run: pnpm exec playwright install --with-deps chromium firefox
+        run: pnpm exec playwright install --with-deps chromium
       - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
         with:
           python-version: "3.14"
@@ -710,8 +713,18 @@ jobs:
           actual = hashlib.sha256(open(dest, 'rb').read()).hexdigest(); \
           (actual == expected) or sys.exit(f'SHA-256 mismatch for {dest}: expected {expected}, got {actual}')"
           echo "PHOENIX_WASM_BINARY_PATH=${{ github.workspace }}/.cache/wasm/python-3.12.0.wasm" >> "$GITHUB_ENV"
+      # Chromium only. playwright.config.ts also defines a firefox project, but on a
+      # standard hosted runner (2 Playwright workers) the two-browser suite produced
+      # no result at all inside 60 minutes, where chromium alone finishes in ~11. The
+      # earlier "passing" 14-minute run was an illusion: firefox was not installed, so
+      # every firefox spec failed instantly on a missing binary and cost nothing.
+      #
+      # This is a deliberate narrowing of the gate, not a fix for whatever makes
+      # firefox slow here. Chromium is the browser the fork's media UI is developed
+      # against; revisit with `--project=firefox` on a schedule if that coverage is
+      # wanted, rather than putting an hour back into every labelled PR.
       - name: Run Playwright tests
-        run: pnpm test:e2e
+        run: pnpm test:e2e --project=chromium
       - uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
         if: always()
         with:
