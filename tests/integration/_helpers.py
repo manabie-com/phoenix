@@ -2428,6 +2428,16 @@ def _ensure_endpoint_coverage_is_exhaustive() -> None:
         raise AssertionError("Endpoint coverage is incomplete!\n\n" + "\n\n".join(error_parts))
 
 
+# Fork-only routes are declared in a fork-owned module, so the coverage constants above
+# stay byte-identical to upstream's. See tests/integration/_fork_endpoints.py.
+from ._fork_endpoints import (  # noqa: E402
+    FORK_COMMON_RESOURCE_ENDPOINTS,
+    FORK_VIEWER_BLOCKED_WRITE_OPERATIONS,
+)
+
+_COMMON_RESOURCE_ENDPOINTS += FORK_COMMON_RESOURCE_ENDPOINTS
+_VIEWER_BLOCKED_WRITE_OPERATIONS += FORK_VIEWER_BLOCKED_WRITE_OPERATIONS
+
 _ensure_endpoint_coverage_is_exhaustive()
 
 

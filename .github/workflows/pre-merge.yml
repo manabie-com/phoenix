@@ -33,7 +33,18 @@ permissions:
 
 on:
   pull_request:
-    types: [opened, synchronize, reopened, labeled, unlabeled]
+    # Deliberately no `synchronize`: pushing commits must not start a run. Tests
+    # begin only when a maintainer applies "Ok to test".
+    #
+    # A push therefore produces a commit with no `Pre-merge` check at all. Because
+    # `Pre-merge` is the required status check on `main`, GitHub treats it as
+    # outstanding and blocks the merge -- a push can never inherit the green tick
+    # from the commit that was reviewed.
+    #
+    # To re-run after pushing: remove the "Ok to test" label and add it back.
+    # `opened`/`reopened` are kept so an unlabelled PR gets the explanatory
+    # failure below instead of a silent missing check.
+    types: [opened, reopened, labeled, unlabeled]
 
 concurrency:
   group: pre-merge-${{ github.event.pull_request.number }}
@@ -241,16 +252,20 @@ jobs:
           sudo apt-get -yqq install postgresql-common
           sudo /usr/share/postgresql-common/pgdg/apt.postgresql.org.sh -y
           sudo apt-get -yqq install postgresql-14
+      # `-n 16` on a 4-core runner is deliberate, and copied from upstream: these
+      # tests block on database round trips rather than CPU, so oversubscribing
+      # cores is what keeps the suite inside its timeout. `-n auto` (4 workers here)
+      # was tried and timed out the PostgreSQL leg at 45m while SQLite took 28m.
       - name: Run unit tests (SQLite)
         if: matrix.db == 'sqlite'
-        timeout-minutes: 45
-        run: uvx tox run -e unit_tests -- -ra --reruns 5 -n auto --dist loadscope
+        timeout-minutes: 60
+        run: uvx tox run -e unit_tests -- -ra --reruns 5 -n 16 --dist loadscope
       - name: Run unit tests (PostgreSQL)
         if: matrix.db == 'postgresql'
-        timeout-minutes: 45
+        timeout-minutes: 60
         run: >-
           uvx tox run -e unit_tests --
-          -ra --reruns 5 --db postgresql -n auto --dist loadscope
+          -ra --reruns 5 --db postgresql -n 16 --dist loadscope
           --postgresql-exec /usr/lib/postgresql/14/bin/pg_ctl
 
   typescript-app:
@@ -407,11 +422,11 @@ jobs:
         uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7.6.0
         with:
           version: ${{ env.UV_VERSION }}
-      # `-n auto` rather than upstream's `-n 16`: this runs on a 4-core
-      # GitHub-hosted runner, not upstream's `oss-4-core-runner` pool.
+      # `-n 16` matches upstream. See the unit-test job for why oversubscribing a
+      # 4-core runner is correct here rather than `-n auto`.
       - name: Run integration tests
         timeout-minutes: 45
-        run: uvx tox run -e integration_tests -- -ra --reruns 5 -n auto
+        run: uvx tox run -e integration_tests -- -ra --reruns 5 -n 16
 
   python-migrations:
     name: DB Migration Continuity (${{ matrix.db }}${{ matrix.concurrently && ', concurrently' || '' }})
@@ -658,9 +673,13 @@ jobs:
         with:
           path: ~/.cache/ms-playwright
           key: ${{ runner.os }}-playwright-${{ env.PLAYWRIGHT_VERSION }}-${{ hashFiles('app/playwright.config.ts') }}
+      # Both browsers, not just chromium: playwright.config.ts defines a firefox
+      # project as well, and only WebKit is dropped (via CI_PLAYWRIGHT_SKIP_WEBKIT).
+      # Installing chromium alone failed every firefox spec with
+      # "browserType.launch: Executable doesn't exist".
       - name: Install Playwright browsers
         if: steps.playwright-cache.outputs.cache-hit != 'true'
-        run: pnpm exec playwright install --with-deps chromium
+        run: pnpm exec playwright install --with-deps chromium firefox
       - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
         with:
           python-version: "3.14"
