@@ -43,6 +43,7 @@ from phoenix.server.api.evaluators import (
     validate_template_variables,
 )
 from phoenix.server.api.exceptions import BadRequest, NotFound, Unauthorized
+from phoenix.server.api.helpers.apply_template_media import media_template_content_part
 from phoenix.server.api.helpers.classification_evaluator_configs import (
     get_classification_evaluator_configs,
 )
@@ -120,8 +121,6 @@ from phoenix.server.api.types.PromptVersion import PromptVersion, to_gql_prompt_
 from phoenix.server.api.types.PromptVersionTag import PromptVersionTag
 from phoenix.server.api.types.PromptVersionTemplate import (
     ContentPart,
-    ImageContentPart,
-    ImageContentValue,
     PromptChatTemplate,
     PromptMessage,
     TextContentPart,
@@ -1850,22 +1849,8 @@ class Query:
                             )
                         )
                     )
-                elif part.image is not UNSET:
-                    assert part.image is not None
-                    # The media URL is formatted like any other template value, so a
-                    # variable can select the media a prompt runs against.
-                    try:
-                        formatted_url = formatter.format(part.image.url, **variables)
-                    except TemplateFormatterError as error:
-                        raise BadRequest(str(error))
-                    content_parts.append(
-                        ImageContentPart(
-                            image=ImageContentValue(
-                                url=formatted_url,
-                                media_type=part.image.media_type,
-                            )
-                        )
-                    )
+                elif (media := media_template_content_part(part, formatter, variables)) is not None:
+                    content_parts.append(media)
             messages.append(PromptMessage(role=PromptMessageRole(msg.role), content=content_parts))
 
         return PromptChatTemplate(messages=messages)

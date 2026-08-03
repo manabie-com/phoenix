@@ -15,7 +15,12 @@
 # Variables used here ($(UV), $(CYAN), $(GREEN), $(NC)) come from the root Makefile,
 # which defines them well before the include.
 
-.PHONY: sync-fork sync-fork-check
+.PHONY: sync-fork sync-fork-check install-gcs
+
+install-gcs: ## Install the Google Cloud Storage SDK, for keeping prompt media in a bucket
+	@echo -e "$(CYAN)Installing Google Cloud Storage support...$(NC)"
+	@$(UV) pip install -r requirements/fork-gcs.txt
+	@echo -e "$(GREEN)✓ Set PHOENIX_MEDIA_GCS_BUCKET to store prompt media in GCS$(NC)"
 
 sync-fork-check: ## Report what syncing with upstream would conflict on (changes nothing)
 	@$(UV) run python scripts/sync_fork.py --check

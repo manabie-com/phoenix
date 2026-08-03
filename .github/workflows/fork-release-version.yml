@@ -1,0 +1,178 @@
+# Fork-owned versioning workflow — cuts a fork-local version on GitHub.
+#
+# Creates a git tag and a GitHub Release. Builds nothing and publishes no
+# artifacts; the version is just a stable anchor other things can reference.
+#
+# ## Versioning scheme
+#
+# The version tracks upstream and appends a fork revision:
+#
+#   <upstream version>-<fork revision>     e.g. 19.13.0-1, 19.13.0-2, 19.14.0-1
+#
+# The upstream part is read from `src/phoenix/version.py` — the same file
+# hatchling stamps wheels from (see [tool.hatch.version] in pyproject.toml), so
+# a release always names the upstream Phoenix it was actually built from. That
+# file is upstream-owned and only ever READ here, never written, so this
+# workflow adds no merge-conflict surface.
+#
+# The revision exists because the fork ships changes between upstream syncs, so
+# several releases share one upstream base. It counts up within a base and
+# resets when a sync moves the base forward. `19.13.0-1` is also a valid Docker
+# tag, unlike a `+build.1` form, in case these versions later name images.
+#
+# Tags are prefixed `manabie-v` — deliberately NOT matching `arize-phoenix-v*`,
+# so a release here can never trigger upstream's `docker-build-release.yml`,
+# which fires on those tag pushes and publishes to the arizephoenix Docker Hub
+# org. All versioning state lives in the tags themselves; there is no version
+# file for a sync to conflict on.
+#
+# Manual trigger only.
+
+name: Fork Release Version
+
+on:
+  workflow_dispatch:
+    inputs:
+      revision:
+        description: "Force this fork revision number instead of auto-incrementing"
+        type: string
+        required: false
+        default: ""
+      version:
+        description: "Escape hatch — release this exact version, ignoring everything above"
+        type: string
+        required: false
+        default: ""
+      dry_run:
+        description: "Resolve the next version but create nothing"
+        type: boolean
+        default: false
+
+# Two concurrent runs would race to claim the same revision number.
+concurrency:
+  group: fork-release-version
+  cancel-in-progress: false
+
+permissions: {}
+
+jobs:
+  version:
+    name: Create fork version
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write # create the tag and the release
+    env:
+      TAG_PREFIX: manabie-v
+    steps:
+      - name: Check out the repo
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          # Full history so the tag list is complete — a shallow clone would
+          # hide existing revisions and restart numbering at 1.
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Resolve next version
+        id: version
+        env:
+          # Inputs go through env, never inline `${{ }}` in run: — that is the
+          # template-injection sink zizmor flags.
+          INPUT_REVISION: ${{ inputs.revision }}
+          INPUT_VERSION: ${{ inputs.version }}
+        run: |
+          set -euo pipefail
+
+          # Upstream version, straight from the file hatchling versions wheels
+          # from. Parsed rather than imported so this needs no Python env.
+          BASE=$(sed -n 's/^__version__ = "\(.*\)"$/\1/p' src/phoenix/version.py)
+          if ! echo "$BASE" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$'; then
+            echo "::error::could not parse an X.Y.Z version from src/phoenix/version.py (got '$BASE')"
+            exit 1
+          fi
+          echo "Upstream base version: $BASE"
+
+          if [ -n "$INPUT_VERSION" ]; then
+            NEXT="$INPUT_VERSION"
+            if ! echo "$NEXT" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+-[0-9]+$'; then
+              echo "::error::version must be X.Y.Z-N, got '$NEXT'"
+              exit 1
+            fi
+            echo "Using explicit version $NEXT"
+          else
+            if [ -n "$INPUT_REVISION" ]; then
+              if ! echo "$INPUT_REVISION" | grep -Eq '^[0-9]+$'; then
+                echo "::error::revision must be a positive integer, got '$INPUT_REVISION'"
+                exit 1
+              fi
+              REV="$INPUT_REVISION"
+              echo "Using forced revision $REV"
+            else
+              # Highest existing revision on THIS upstream base. A base bump
+              # therefore restarts at 1 with no manual intervention.
+              LATEST_REV=$(git tag -l "${TAG_PREFIX}${BASE}-*" \
+                | sed "s|^${TAG_PREFIX}${BASE}-||" \
+                | grep -E '^[0-9]+$' \
+                | sort -n \
+                | tail -1 || true)
+
+              if [ -z "$LATEST_REV" ]; then
+                REV=1
+                echo "First release on base $BASE — revision $REV"
+              else
+                REV=$((LATEST_REV + 1))
+                echo "Latest revision on base $BASE is $LATEST_REV — next is $REV"
+              fi
+            fi
+            NEXT="${BASE}-${REV}"
+          fi
+
+          if git rev-parse -q --verify "refs/tags/${TAG_PREFIX}${NEXT}" >/dev/null; then
+            echo "::error::tag ${TAG_PREFIX}${NEXT} already exists"
+            exit 1
+          fi
+
+          echo "base=$BASE" >>"$GITHUB_OUTPUT"
+          echo "version=$NEXT" >>"$GITHUB_OUTPUT"
+          echo "tag=${TAG_PREFIX}${NEXT}" >>"$GITHUB_OUTPUT"
+
+      # Creates the tag and the release in one call. Runs through `gh` rather
+      # than `git push` because the checkout above persists no credentials.
+      - name: Create tag and release
+        if: ${{ !inputs.dry_run }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_TAG: ${{ steps.version.outputs.tag }}
+          RELEASE_VERSION: ${{ steps.version.outputs.version }}
+          RELEASE_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          gh release create "$RELEASE_TAG" \
+            --target "$RELEASE_SHA" \
+            --title "$RELEASE_VERSION" \
+            --generate-notes
+
+      - name: Summary
+        env:
+          RELEASE_BASE: ${{ steps.version.outputs.base }}
+          RELEASE_TAG: ${{ steps.version.outputs.tag }}
+          RELEASE_VERSION: ${{ steps.version.outputs.version }}
+          RELEASE_SHA: ${{ github.sha }}
+          DRY_RUN: ${{ inputs.dry_run }}
+        run: |
+          set -euo pipefail
+          {
+            echo "### Fork version ${RELEASE_VERSION}"
+            echo
+            if [ "$DRY_RUN" = "true" ]; then
+              echo "**Dry run** — nothing was created."
+              echo
+            fi
+            echo '| | |'
+            echo '|---|---|'
+            echo "| Version | \`${RELEASE_VERSION}\` |"
+            echo "| Upstream base | \`${RELEASE_BASE}\` |"
+            echo "| Git tag | \`${RELEASE_TAG}\` |"
+            echo "| Commit | \`${RELEASE_SHA}\` |"
+          } >>"$GITHUB_STEP_SUMMARY"

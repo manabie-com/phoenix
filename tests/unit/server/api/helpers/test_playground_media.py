@@ -3,7 +3,7 @@ from __future__ import annotations
 import base64
 import hashlib
 from contextlib import asynccontextmanager
-from typing import Any, AsyncIterator, Callable
+from typing import Any, AsyncIterator, Callable, cast
 
 import pytest
 from openinference.semconv.trace import SpanAttributes
@@ -25,6 +25,7 @@ from phoenix.db.types.prompts import (
 )
 from phoenix.server.api.exceptions import BadRequest
 from phoenix.server.api.helpers.media import MediaResolutionError
+from phoenix.server.api.helpers.media_storage import media_store
 from phoenix.server.api.helpers.message_helpers import (
     PlaygroundMessage,
     formatted_messages,
@@ -45,6 +46,7 @@ from phoenix.server.api.helpers.playground_clients import (
 from phoenix.server.api.helpers.playground_media import google_parts
 from phoenix.server.api.types.ChatCompletionMessageRole import ChatCompletionMessageRole
 from phoenix.server.types import DbSessionFactory
+from tests.unit.media_store_fixtures import isolated_media_store  # noqa: F401
 
 _PNG_BYTES = base64.b64decode(
     "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8DwHwAFAAH/q842iQAAAABJRU5ErkJggg=="
@@ -80,13 +82,13 @@ def _template(*, url: str = _PNG_URL, media_type: str = "image/png") -> PromptCh
 
 @pytest.fixture
 async def stored_png(db: DbSessionFactory) -> None:
+    await media_store().put(_PNG_DIGEST, _PNG_BYTES, media_type="image/png")
     async with db() as session:
         session.add(
             models.MediaFile(
                 sha256=_PNG_DIGEST,
                 media_type="image/png",
                 size_bytes=len(_PNG_BYTES),
-                content=_PNG_BYTES,
             )
         )
 
@@ -268,13 +270,13 @@ class TestGoogleParts:
         self,
         db: DbSessionFactory,
     ) -> None:
+        await media_store().put(_GIF_DIGEST, _GIF_BYTES, media_type="image/gif")
         async with db() as session:
             session.add(
                 models.MediaFile(
                     sha256=_GIF_DIGEST,
                     media_type="image/gif",
                     size_bytes=len(_GIF_BYTES),
-                    content=_GIF_BYTES,
                 )
             )
         messages = prompt_chat_template_to_playground_messages(
@@ -318,11 +320,60 @@ class TestGoogleParts:
         assert google_parts(message) == [{"text": ""}]
 
 
-class TestProvidersWithoutMediaSupport:
+class TestMediaOnANonUserRole:
+    """
+    Every provider takes media now, so a rejection means the role was wrong.
+
+    The rule is enforced when a prompt version is written (see
+    `reject_media_on_non_user_role`) and re-checked at the provider, so a message
+    that arrived by another route fails loudly instead of being sent with its media
+    silently dropped.
+    """
+
     def test_reject_media_names_the_provider(self) -> None:
         (message,) = prompt_chat_template_to_playground_messages(_template())
-        with pytest.raises(BadRequest, match="Anthropic does not support image content"):
-            reject_media([message], provider="Anthropic")
+        smuggled = cast(PlaygroundMessage, {**message, "role": ChatCompletionMessageRole.AI})
+        with pytest.raises(BadRequest, match="Anthropic cannot take image content"):
+            reject_media([smuggled], provider="Anthropic")
+
+    def test_reject_media_names_the_offending_role(self) -> None:
+        (message,) = prompt_chat_template_to_playground_messages(_template())
+        smuggled = cast(PlaygroundMessage, {**message, "role": ChatCompletionMessageRole.SYSTEM})
+        with pytest.raises(BadRequest, match="message with role 'system'"):
+            reject_media([smuggled], provider="Anthropic")
+
+    def test_reject_media_points_at_the_rule_rather_than_another_provider(self) -> None:
+        """
+        The old wording claimed the provider lacked support and suggested Google,
+        which was wrong on both counts once every provider gained media.
+        """
+        (message,) = prompt_chat_template_to_playground_messages(_template())
+        smuggled = cast(PlaygroundMessage, {**message, "role": ChatCompletionMessageRole.AI})
+        with pytest.raises(BadRequest) as error:
+            reject_media([smuggled], provider="Anthropic")
+        assert "only supported on 'user' messages" in str(error.value)
+        assert "Google" not in str(error.value)
+        assert "does not support" not in str(error.value)
+
+    def test_reject_media_calls_a_pdf_a_document(self) -> None:
+        template = PromptChatTemplate(
+            type="chat",
+            messages=[
+                PromptMessage(
+                    role="user",
+                    content=[
+                        FileContentPart(
+                            type="file",
+                            file=MediaContent(url=_PDF_URL, media_type="application/pdf"),
+                        )
+                    ],
+                )
+            ],
+        )
+        (message,) = prompt_chat_template_to_playground_messages(template)
+        smuggled = cast(PlaygroundMessage, {**message, "role": ChatCompletionMessageRole.AI})
+        with pytest.raises(BadRequest, match="cannot take document content"):
+            reject_media([smuggled], provider="Anthropic")
 
     def test_reject_media_allows_text_only_messages(self) -> None:
         messages = prompt_chat_template_to_playground_messages(
@@ -336,11 +387,6 @@ class TestProvidersWithoutMediaSupport:
         reject_media(messages, provider="Anthropic")
 
     def test_media_on_a_non_user_turn_is_rejected(self) -> None:
-        """
-        Only user turns may carry media, enforced when a prompt version is written.
-        Each provider still refuses loudly rather than dropping an image that
-        reached it on another role.
-        """
         (message,) = prompt_chat_template_to_playground_messages(_template())
         smuggled = {**message, "role": ChatCompletionMessageRole.AI}
         builders: tuple[Callable[[], Any], ...] = (
@@ -350,7 +396,7 @@ class TestProvidersWithoutMediaSupport:
             lambda: _responses_client()._to_openai_response_input_item_param([smuggled]),
         )
         for build in builders:
-            with pytest.raises(BadRequest, match="does not support image content"):
+            with pytest.raises(BadRequest, match="only supported on 'user' messages"):
                 build()
 
 
@@ -511,6 +557,65 @@ class TestMediaVariables:
         ]
 
 
+def _file_variable_template(name: str = "statement") -> PromptChatTemplate:
+    return PromptChatTemplate(
+        type="chat",
+        messages=[
+            PromptMessage(
+                role="user",
+                content=[
+                    TextContentPart(type="text", text="summarise {{aspect}}"),
+                    FileContentPart(type="file", file=MediaVariable(variable=name)),
+                ],
+            )
+        ],
+    )
+
+
+class TestDocumentVariablesAreDescribedAsDocuments:
+    """
+    A prompt carrying a PDF should not be told anything about images.
+
+    These messages are the ones a user sees when a run is missing an input, so the
+    noun has to follow the part rather than being hardcoded to the kind that shipped
+    first.
+    """
+
+    def test_a_missing_document_is_reported_as_a_document(self) -> None:
+        with pytest.raises(BadRequest, match="No document was supplied for 'statement'"):
+            formatted_messages(
+                messages=prompt_chat_template_to_playground_messages(_file_variable_template()),
+                template_format=PromptTemplateFormat.MUSTACHE,
+                template_variables={"aspect": "the risks"},
+            )
+
+    def test_a_blank_document_value_is_reported_as_a_document(self) -> None:
+        with pytest.raises(BadRequest, match="is not a document reference"):
+            formatted_messages(
+                messages=prompt_chat_template_to_playground_messages(_file_variable_template()),
+                template_format=PromptTemplateFormat.MUSTACHE,
+                template_variables={"aspect": "the risks", "statement": "   "},
+            )
+
+    async def test_an_unsubstituted_document_is_reported_as_a_document(
+        self,
+        db: DbSessionFactory,
+    ) -> None:
+        messages = prompt_chat_template_to_playground_messages(_file_variable_template())
+        async with db() as session:
+            with pytest.raises(MediaResolutionError, match="No document reference was substituted"):
+                await resolve_message_media(session, messages)
+
+    def test_an_image_is_still_reported_as_an_image(self) -> None:
+        """The image wording must not regress while the file wording is added."""
+        with pytest.raises(BadRequest, match="No image was supplied for 'question_image'"):
+            formatted_messages(
+                messages=prompt_chat_template_to_playground_messages(_variable_template()),
+                template_format=PromptTemplateFormat.MUSTACHE,
+                template_variables={"aspect": "colour"},
+            )
+
+
 def _openai_client() -> Any:
     from phoenix.server.api.helpers.playground_clients import OpenAIStreamingClient
 
@@ -586,13 +691,13 @@ class TestOpenAIImages:
     ) -> None:
         heic_bytes = b"\x00\x00\x00\x18ftypheic" + b"\x00" * 8
         digest = hashlib.sha256(heic_bytes).hexdigest()
+        await media_store().put(digest, heic_bytes, media_type="image/heic")
         async with db() as session:
             session.add(
                 models.MediaFile(
                     sha256=digest,
                     media_type="image/heic",
                     size_bytes=len(heic_bytes),
-                    content=heic_bytes,
                 )
             )
         messages = prompt_chat_template_to_playground_messages(
@@ -765,13 +870,13 @@ _PDF_URL = hosted_media_url(_PDF_DIGEST)
 
 @pytest.fixture
 async def stored_pdf(db: DbSessionFactory) -> None:
+    await media_store().put(_PDF_DIGEST, _PDF_BYTES, media_type="application/pdf")
     async with db() as session:
         session.add(
             models.MediaFile(
                 sha256=_PDF_DIGEST,
                 media_type="application/pdf",
                 size_bytes=len(_PDF_BYTES),
-                content=_PDF_BYTES,
                 file_name="statement.pdf",
             )
         )

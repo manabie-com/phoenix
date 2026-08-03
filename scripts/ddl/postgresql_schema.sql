@@ -55,11 +55,14 @@ CREATE TABLE public.media_files (
     sha256 VARCHAR NOT NULL,
     media_type VARCHAR NOT NULL,
     size_bytes INTEGER NOT NULL,
-    content BYTEA NOT NULL,
     file_name VARCHAR,
     created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now(),
+    referenced_at TIMESTAMP WITH TIME ZONE,
     CONSTRAINT pk_media_files PRIMARY KEY (sha256)
 );
+
+CREATE INDEX ix_media_files_created_at ON public.media_files
+    USING btree (created_at);
 
 
 -- Table: oauth2_clients
