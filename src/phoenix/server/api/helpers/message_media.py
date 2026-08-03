@@ -19,7 +19,11 @@ from typing_extensions import Required, TypeAlias, TypedDict
 from phoenix.db.types.media import MediaContent
 from phoenix.db.types.media_parts import MediaContentPart, media_source
 from phoenix.server.api.exceptions import BadRequest
-from phoenix.server.api.helpers.media import MediaResolutionError, resolve_media
+from phoenix.server.api.helpers.media import (
+    MediaResolutionError,
+    mark_media_referenced,
+    resolve_media,
+)
 from phoenix.utilities.template_formatters import TemplateFormatter
 
 if TYPE_CHECKING:
@@ -60,6 +64,20 @@ class MediaContentBlock(TypedDict, total=False):
 
 
 ContentBlock: TypeAlias = Union[TextContentBlock, MediaContentBlock]
+
+
+def _media_noun(kind: str) -> str:
+    """
+    What to call a media kind in a message a user reads.
+
+    A prompt carrying a PDF should not be told anything about images.
+    """
+    return "document" if kind == "file" else "image"
+
+
+def _a_media_noun(kind: str) -> str:
+    """:func:`_media_noun` with its indefinite article."""
+    return "a document" if kind == "file" else "an image"
 
 
 def message_text(message: "PlaygroundMessage") -> str:
@@ -120,24 +138,31 @@ def content_blocks(message: "PlaygroundMessage") -> list[ContentBlock]:
 
 def reject_media(messages: Iterable["PlaygroundMessage"], *, provider: str) -> None:
     """
-    Reject messages carrying media, for providers without media support yet.
+    Refuse a message that carries media on a role that may not.
 
-    Fails loudly rather than sending the provider a prompt with its images
-    silently removed.
+    Every supported provider takes media now, so reaching here means the media sat on
+    something other than a user turn — a rule enforced when a prompt version is
+    written (see `reject_media_on_non_user_role`), re-checked at the provider so that
+    a message which arrived by another route fails loudly instead of being sent with
+    its media silently dropped.
 
     Args:
         messages: The messages about to be sent.
         provider: Human-readable provider name, used in the error message.
 
     Raises:
-        BadRequest: Any message carries a media block.
+        BadRequest: A message carries media on a role that may not.
     """
     for message in messages:
-        if message_media(message):
-            raise BadRequest(
-                f"{provider} does not support image content in Phoenix yet. "
-                f"Remove the image from the prompt, or run it against Google."
-            )
+        if not (media := message_media(message)):
+            continue
+        role = message.get("role")
+        role_name = role.value.lower() if role is not None else "non-user"
+        noun = _media_noun(media[0]["kind"])
+        raise BadRequest(
+            f"{provider} cannot take {noun} content on a message with role "
+            f"'{role_name}'. Media is only supported on 'user' messages."
+        )
 
 
 async def resolve_message_media(
@@ -150,6 +175,10 @@ async def resolve_message_media(
     Call once the message list is final — after template formatting and after any
     per-example messages have been appended — so that a single batch resolves every
     reference across every message.
+
+    Resolving is also what marks media as used, which is what keeps the sweeper from
+    reclaiming it: this is the one place every path to a provider passes through, and
+    the span each of those paths writes holds a reference the sweeper cannot see.
 
     Args:
         session: Session used to read Phoenix-hosted media.
@@ -169,13 +198,16 @@ async def resolve_message_media(
             if "url" not in media_block:
                 # formatted_messages fills a variable's reference in. Reaching here
                 # means the message never went through it.
-                name = media_block.get("variable", "an image")
-                raise MediaResolutionError(f"No image reference was substituted for '{name}'.")
+                noun = _media_noun(media_block["kind"])
+                name = media_block.get("variable")
+                target = f"'{name}'" if name else f"the {noun}"
+                raise MediaResolutionError(f"No {noun} reference was substituted for {target}.")
     urls = [block["url"] for message in message_list for block in message_media(message)]
     if not urls:
         return message_list
 
     resolved = await resolve_media(session, urls)
+    await mark_media_referenced(session, urls)
     output: list["PlaygroundMessage"] = []
     for message in message_list:
         content = message.get("content")
@@ -204,13 +236,19 @@ async def resolve_message_media(
     return output
 
 
-def _media_variable_value(variable: str, template_variables: Mapping[str, Any]) -> str:
+def _media_variable_value(
+    variable: str,
+    template_variables: Mapping[str, Any],
+    *,
+    kind: str,
+) -> str:
     """
     The media reference supplied for a media variable.
 
     Args:
         variable: The media variable's name.
         template_variables: The values supplied for this run.
+        kind: Which kind of media the part expects, so the error names it correctly.
 
     Returns:
         The reference to resolve, e.g. ``phoenix://media/<sha256>``.
@@ -218,13 +256,14 @@ def _media_variable_value(variable: str, template_variables: Mapping[str, Any]) 
     Raises:
         BadRequest: No value was supplied, or the value is not a reference string.
     """
+    noun = _media_noun(kind)
     if variable not in template_variables:
-        raise BadRequest(f"No image was supplied for '{variable}'.")
+        raise BadRequest(f"No {noun} was supplied for '{variable}'.")
     value = template_variables[variable]
     if not isinstance(value, str) or not value.strip():
         raise BadRequest(
-            f"The value supplied for '{variable}' is not an image reference. "
-            f"Upload an image for it and try again."
+            f"The value supplied for '{variable}' is not {_a_media_noun(kind)} reference. "
+            f"Upload one for it and try again."
         )
     return value
 
@@ -292,7 +331,7 @@ def format_message_content(
                     type="media",
                     kind=block["kind"],
                     variable=variable,
-                    url=_media_variable_value(variable, template_variables),
+                    url=_media_variable_value(variable, template_variables, kind=block["kind"]),
                 )
             )
         else:

@@ -2,10 +2,12 @@ from __future__ import annotations
 
 import hashlib
 from datetime import datetime, timedelta, timezone
+from secrets import token_hex
 from typing import Optional
 
 import pytest
 from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from phoenix.db import models
 from phoenix.db.types.identifier import Identifier
@@ -23,8 +25,14 @@ from phoenix.db.types.prompts import (
     PromptTemplateType,
     TextContentPart,
 )
-from phoenix.server.daemons.media_sweeper import MediaSweeper, referenced_digests
+from phoenix.server.api.helpers.media_storage import media_store
+from phoenix.server.daemons.media_sweeper import (
+    MediaSweeper,
+    digests_in_json,
+    referenced_digests,
+)
 from phoenix.server.types import DbSessionFactory
+from tests.unit.media_store_fixtures import isolated_media_store  # noqa: F401
 
 
 def _digest(seed: str) -> str:
@@ -36,15 +44,112 @@ async def _store_media(
     sha256: str,
     *,
     age: timedelta = timedelta(days=7),
+    used: bool = False,
 ) -> None:
+    await media_store().put(sha256, b"png", media_type="image/png")
     async with db() as session:
         session.add(
             models.MediaFile(
                 sha256=sha256,
                 media_type="image/png",
                 size_bytes=3,
-                content=b"png",
                 created_at=datetime.now(timezone.utc) - age,
+                # A run stamps this, standing in for the span reference the sweep
+                # cannot see.
+                referenced_at=datetime.now(timezone.utc) if used else None,
+            )
+        )
+
+
+def _chat_template_with_image(image_url: str) -> PromptChatTemplate:
+    return PromptChatTemplate(
+        type="chat",
+        messages=[
+            PromptMessage(
+                role="user",
+                content=[
+                    TextContentPart(type="text", text="describe this"),
+                    ImageContentPart(
+                        type="image",
+                        image=MediaContent(url=image_url, media_type="image/png"),
+                    ),
+                ],
+            )
+        ],
+    )
+
+
+async def _dataset_and_version(session: AsyncSession) -> tuple[int, int]:
+    """
+    A dataset and one version of it, for the artifacts that need both.
+
+    The name is randomised because a single test may need more than one dataset and
+    `datasets.name` is unique.
+    """
+    dataset = models.Dataset(name=f"media-{token_hex(8)}", metadata_={})
+    session.add(dataset)
+    await session.flush()
+    version = models.DatasetVersion(dataset_id=dataset.id, description=None, metadata_={})
+    session.add(version)
+    await session.flush()
+    return dataset.id, version.id
+
+
+async def _store_experiment_task_with_image(db: DbSessionFactory, image_url: str) -> None:
+    """
+    An experiment whose prompt was never saved as a prompt version.
+
+    This is what the playground writes when an experiment runs against an unsaved
+    prompt: the template, media parts and all, lands in `experiment_prompt_tasks`
+    and `prompt_version_id` stays NULL.
+    """
+    async with db() as session:
+        dataset_id, version_id = await _dataset_and_version(session)
+        experiment = models.Experiment(
+            dataset_id=dataset_id,
+            dataset_version_id=version_id,
+            name="media-experiment",
+            repetitions=1,
+            metadata_={},
+        )
+        session.add(experiment)
+        await session.flush()
+        session.add(
+            models.ExperimentPromptTask(
+                id=experiment.id,
+                model_provider=ModelProvider.OPENAI,
+                model_name="gpt-4o",
+                template_type=PromptTemplateType.CHAT,
+                template_format=PromptTemplateFormat.MUSTACHE,
+                template=_chat_template_with_image(image_url),
+                invocation_parameters=PromptOpenAIInvocationParameters(
+                    type="openai",
+                    openai=PromptOpenAIInvocationParametersContent(),
+                ),
+            )
+        )
+
+
+async def _store_dataset_example_with_media(db: DbSessionFactory, image_url: str) -> None:
+    """
+    A dataset example supplying a media variable's value.
+
+    A prompt with a media *variable* takes its reference from the run's template
+    variables, which for an experiment come from the dataset example's input.
+    """
+    async with db() as session:
+        dataset_id, version_id = await _dataset_and_version(session)
+        example = models.DatasetExample(dataset_id=dataset_id)
+        session.add(example)
+        await session.flush()
+        session.add(
+            models.DatasetExampleRevision(
+                dataset_example_id=example.id,
+                dataset_version_id=version_id,
+                input={"question": "what is this?", "picture": image_url},
+                output={},
+                metadata_={},
+                revision_kind="CREATE",
             )
         )
 
@@ -147,6 +252,29 @@ class TestReferencedDigests:
         assert referenced_digests(templates) == set()
 
 
+class TestDigestsInJson:
+    def test_finds_a_reference_anywhere_in_the_value(self) -> None:
+        digest = _digest("nested")
+        value = {
+            "question": "what is this?",
+            "attachments": [{"picture": hosted_media_url(digest)}],
+        }
+        assert digests_in_json([value]) == {digest}
+
+    def test_ignores_values_carrying_no_reference(self) -> None:
+        assert digests_in_json([{"question": "hi"}, None, {}]) == set()
+
+    def test_ignores_a_prefix_without_a_valid_digest(self) -> None:
+        assert digests_in_json([{"picture": "phoenix://media/not-a-digest"}]) == set()
+
+    def test_survives_a_value_json_cannot_serialize(self) -> None:
+        """One odd value must not fail the whole sweep."""
+        digest = _digest("alongside")
+        assert digests_in_json([{"when": object(), "picture": hosted_media_url(digest)}]) == {
+            digest
+        }
+
+
 class TestMediaSweeper:
     async def test_deletes_unreferenced_media(self, db: DbSessionFactory) -> None:
         orphan = _digest("orphan")
@@ -240,3 +368,90 @@ class TestMediaSweeper:
 
         assert await MediaSweeper(db)._delete_orphaned_media() == 150
         assert await _stored_digests(db) == set()
+
+    async def test_deletes_the_bytes_not_only_the_row(self, db: DbSessionFactory) -> None:
+        """
+        Leaving the bytes behind would move the orphan problem into a bucket nobody
+        watches, where it would be invisible — the database would look clean.
+        """
+        orphan = _digest("orphan-with-bytes")
+        await _store_media(db, orphan)
+        assert await media_store().get(orphan) is not None
+
+        assert await MediaSweeper(db)._delete_orphaned_media() == 1
+
+        assert await _stored_digests(db) == set()
+        assert await media_store().get(orphan) is None
+
+    async def test_keeps_the_bytes_of_media_it_keeps(self, db: DbSessionFactory) -> None:
+        keep, drop = _digest("keep-bytes"), _digest("drop-bytes")
+        await _store_media(db, keep)
+        await _store_media(db, drop)
+        await _store_prompt_with_image(db, "keeper", hosted_media_url(keep))
+
+        assert await MediaSweeper(db)._delete_orphaned_media() == 1
+
+        assert await media_store().get(keep) is not None
+        assert await media_store().get(drop) is None
+
+    async def test_keeps_media_a_run_has_used(self, db: DbSessionFactory) -> None:
+        """
+        The regression this column exists for.
+
+        A playground run records `phoenix://media/<sha256>` on a span and the span is
+        never scanned, so without the stamp this row looks abandoned and the trace
+        loses its image permanently.
+        """
+        used = _digest("used-by-a-run")
+        await _store_media(db, used, used=True)
+
+        assert await MediaSweeper(db)._delete_orphaned_media() == 0
+        assert await _stored_digests(db) == {used}
+
+    async def test_keeps_media_referenced_by_an_experiment_task(
+        self,
+        db: DbSessionFactory,
+    ) -> None:
+        """An experiment from an unsaved prompt keeps its template outside prompt_versions."""
+        referenced = _digest("experiment-task")
+        await _store_media(db, referenced)
+        await _store_experiment_task_with_image(db, hosted_media_url(referenced))
+
+        assert await MediaSweeper(db)._delete_orphaned_media() == 0
+        assert await _stored_digests(db) == {referenced}
+
+    async def test_keeps_media_referenced_by_a_dataset_example(
+        self,
+        db: DbSessionFactory,
+    ) -> None:
+        """A media variable's value lives in the dataset example, not in the template."""
+        referenced = _digest("dataset-example")
+        await _store_media(db, referenced)
+        await _store_dataset_example_with_media(db, hosted_media_url(referenced))
+
+        assert await MediaSweeper(db)._delete_orphaned_media() == 0
+        assert await _stored_digests(db) == {referenced}
+
+    async def test_still_reclaims_media_that_was_never_used(
+        self,
+        db: DbSessionFactory,
+    ) -> None:
+        """
+        The sweeper must not become a no-op.
+
+        Media attached in the playground and then abandoned is the case it was built
+        for, and widening the live set must not cost that.
+        """
+        abandoned = _digest("never-used")
+        kept_by_run = _digest("used")
+        kept_by_task = _digest("in-a-task")
+        kept_by_example = _digest("in-an-example")
+        await _store_media(db, abandoned)
+        await _store_media(db, kept_by_run, used=True)
+        await _store_media(db, kept_by_task)
+        await _store_media(db, kept_by_example)
+        await _store_experiment_task_with_image(db, hosted_media_url(kept_by_task))
+        await _store_dataset_example_with_media(db, hosted_media_url(kept_by_example))
+
+        assert await MediaSweeper(db)._delete_orphaned_media() == 1
+        assert await _stored_digests(db) == {kept_by_run, kept_by_task, kept_by_example}

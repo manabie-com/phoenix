@@ -1,0 +1,24 @@
+# Google Cloud Storage for prompt media.
+#
+# Declared here rather than as a `gcs` extra in pyproject.toml on purpose. An extra
+# would have to be appended to `[project.optional-dependencies]`, and the end of that
+# table is exactly where upstream adds its own extras — so both sides would collide
+# there on a sync. This file is a path upstream does not have, so it cannot conflict.
+#
+# Only needed when PHOENIX_MEDIA_GCS_BUCKET is set. Without it, media is kept on the
+# local filesystem and the SDK is never imported — see
+# `phoenix.server.api.helpers.media_storage`.
+#
+#     pip install -r requirements/fork-gcs.txt
+#
+# or, from the repo root:
+#
+#     make install-gcs
+#
+# Floor is 3.0 rather than a 2.x: 3.x is what resolves and what this was built against,
+# and its `requires-python >= 3.10` matches Phoenix's own floor exactly, so nothing is
+# excluded by it. No upper bound, following how the other optional SDKs in this repo are
+# declared. The API used is small and long-stable — `Blob.upload_from_string` with
+# `content_type` and `if_generation_match`, `download_as_bytes`, `delete`, and
+# `NotFound` / `PreconditionFailed` — verified present in both 3.0.0 and 3.13.0.
+google-cloud-storage>=3.0.0

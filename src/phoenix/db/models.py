@@ -2798,9 +2798,12 @@ class PromptVersionTag(HasId):
 
 class MediaFile(Base):
     """
-    Content-addressed binary media referenced by prompt templates.
+    Metadata for the content-addressed media referenced by prompt templates.
 
-    Rows are immutable and shared. The SHA-256 digest of ``content`` is the
+    The bytes themselves live in object storage, not here — see
+    `phoenix.server.api.helpers.media_storage`.
+
+    Rows are immutable and shared. The SHA-256 digest of the media is the
     primary key, so re-uploading identical bytes is a no-op and saving a new
     prompt version whose media is unchanged costs no additional storage —
     important because prompt versions are immutable and accumulate.
@@ -2815,12 +2818,20 @@ class MediaFile(Base):
     sha256: Mapped[str] = mapped_column(String, primary_key=True)
     media_type: Mapped[str] = mapped_column(String, nullable=False)
     size_bytes: Mapped[int] = mapped_column(Integer, nullable=False)
-    content: Mapped[bytes] = mapped_column(LargeBinary, nullable=False)
     # The name the media was first uploaded under. Some providers require a name to
     # carry a document; identical bytes uploaded twice keep the first name, which is
     # the trade content-addressing makes.
     file_name: Mapped[Optional[str]] = mapped_column(String, nullable=True)
-    created_at: Mapped[datetime] = mapped_column(UtcTimeStamp, server_default=func.now())
+    created_at: Mapped[datetime] = mapped_column(
+        UtcTimeStamp, server_default=func.now(), index=True
+    )
+    # When this media was first used by a run, or NULL if it never has been.
+    #
+    # Stands in for scanning every span that records a media reference: the sweeper
+    # cannot afford an hourly scan of `spans`, so a run stamps the media it resolves
+    # and the sweeper reclaims only rows that were never used at all. Set once and
+    # never cleared, so a stamped row is kept for good.
+    referenced_at: Mapped[Optional[datetime]] = mapped_column(UtcTimeStamp, nullable=True)
 
 
 class AnnotationConfig(HasId):

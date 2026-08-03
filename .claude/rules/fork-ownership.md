@@ -95,7 +95,7 @@ git diff --numstat upstream/main
 
 Lines in files upstream owns are the entire conflict surface; lines in fork-only files are
 free. Keep the ratio moving toward fork-only. Current: 30 upstream-owned files carrying
-+610/−108 hand-written lines, against ~8,500 in fork-only files.
++607/−108 hand-written lines, against ~12,400 in fork-only files.
 
 ## See also
 

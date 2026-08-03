@@ -24,6 +24,7 @@ from phoenix.db import models
 from phoenix.db.helpers import SupportedSQLDialect
 from phoenix.db.insertion.helpers import OnConflict, insert_on_conflict
 from phoenix.db.types.media import SUPPORTED_MEDIA_TYPES, hosted_media_url
+from phoenix.server.api.helpers.media_storage import media_store
 from phoenix.server.api.routers.v1.models import V1RoutesBaseModel
 from phoenix.server.api.routers.v1.utils import (
     RequestBody,
@@ -104,6 +105,26 @@ class ImportMediaRequestBodyWrapper(RequestBody[ImportMediaRequestBody]):
     pass
 
 
+def _is_public_address(address: str) -> bool:
+    """
+    Whether an address belongs to the public internet.
+
+    Args:
+        address: An IPv4 or IPv6 address in string form.
+
+    Returns:
+        False for anything Phoenix should not be made to fetch from — loopback,
+        link-local (where cloud metadata endpoints live), private ranges, and
+        multicast. Also False for an address that cannot be parsed: a check that
+        cannot be performed has not passed.
+    """
+    try:
+        parsed = ip_address(address)
+    except ValueError:
+        return False
+    return parsed.is_global and not parsed.is_multicast
+
+
 def _reject_unsafe_host(host: str) -> None:
     """
     Reject a host that resolves anywhere other than the public internet.
@@ -113,6 +134,9 @@ def _reject_unsafe_host(host: str) -> None:
     network, services on loopback. Every resolved address is checked, not just the
     first, since a hostname can return a mix.
 
+    This is a check on the *name*. See :func:`_reject_unsafe_peer` for the check on
+    the connection that name actually produced.
+
     Args:
         host: The hostname or IP from the URL.
 
@@ -121,7 +145,9 @@ def _reject_unsafe_host(host: str) -> None:
             non-public address.
     """
     try:
-        addresses = {info[4][0] for info in socket.getaddrinfo(host, None)}
+        # `getaddrinfo` types its sockaddr loosely, and every check downstream wants
+        # the address as a string.
+        addresses = {str(info[4][0]) for info in socket.getaddrinfo(host, None)}
     except socket.gaierror:
         raise HTTPException(
             status_code=HTTP_422_UNPROCESSABLE_ENTITY,
@@ -133,8 +159,7 @@ def _reject_unsafe_host(host: str) -> None:
             detail=f"Could not resolve {host}.",
         )
     for address in addresses:
-        parsed = ip_address(address)
-        if not parsed.is_global or parsed.is_multicast:
+        if not _is_public_address(address):
             raise HTTPException(
                 status_code=HTTP_422_UNPROCESSABLE_ENTITY,
                 detail=(
@@ -142,6 +167,78 @@ def _reject_unsafe_host(host: str) -> None:
                     f"Only images on the public internet can be imported by URL."
                 ),
             )
+
+
+def _reject_unsafe_peer(response: httpx.Response) -> None:
+    """
+    Reject a response that arrived from a non-public address.
+
+    :func:`_reject_unsafe_host` resolves the hostname, and then httpx resolves it
+    again in order to connect. A record with a very short TTL can answer those two
+    lookups differently — public for the check, ``169.254.169.254`` for the
+    connection — so the name-based check can be walked past on its own. This asks the
+    socket where the bytes are actually coming from.
+
+    Called before the body is read, so nothing internal is ever stored or served
+    back. It does not stop the request from being sent; that would need the
+    connection pinned to the address already validated, which httpx does not expose
+    without a custom transport.
+
+    Args:
+        response: A streamed response whose body has not been read yet.
+
+    Raises:
+        HTTPException: 422 if the peer is not a public address.
+    """
+    stream = response.extensions.get("network_stream")
+    if stream is None:
+        # No socket to interrogate — a mock transport, say. The name-based check
+        # has already run regardless.
+        return
+    if not (server_addr := stream.get_extra_info("server_addr")):
+        return
+    address = str(server_addr[0])
+    if not _is_public_address(address):
+        raise HTTPException(
+            status_code=HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=(
+                f"The URL was served from a non-public address ({address}). "
+                f"Only images on the public internet can be imported by URL."
+            ),
+        )
+
+
+async def _read_capped(response: httpx.Response, max_bytes: int) -> bytes:
+    """
+    Read a streamed response, giving up as soon as it exceeds the limit.
+
+    The cap has to be applied while reading rather than afterwards. httpx enforces no
+    maximum response size, so materializing the body first would let a caller-named
+    URL decide how much memory Phoenix allocates — a 10 GB file would be entirely
+    resident before being rejected for exceeding 20 MiB. The upload path applies the
+    same discipline by reading one byte past the limit and no further.
+
+    Args:
+        response: A streamed response whose body has not been read yet.
+        max_bytes: The most that may be read.
+
+    Returns:
+        The response body.
+
+    Raises:
+        HTTPException: 413 as soon as the body is known to exceed ``max_bytes``.
+    """
+    chunks: list[bytes] = []
+    total = 0
+    async for chunk in response.aiter_bytes():
+        total += len(chunk)
+        if total > max_bytes:
+            raise HTTPException(
+                status_code=HTTP_413_CONTENT_TOO_LARGE,
+                detail=f"Media exceeds the maximum supported size of {max_bytes} bytes.",
+            )
+        chunks.append(chunk)
+    return b"".join(chunks)
 
 
 @router.post(
@@ -237,6 +334,10 @@ async def _store_media(
         )
 
     sha256 = hashlib.sha256(content).hexdigest()
+    # Bytes first, metadata second. The other order would leave a row promising media
+    # that is not there yet, which every reader would report as missing. This order can
+    # leave stored bytes with no row, which the sweeper reclaims as unreferenced.
+    await media_store().put(sha256, content, media_type=media_type)
     async with request.app.state.db() as session:
         dialect = SupportedSQLDialect(session.bind.dialect.name)
         await session.execute(
@@ -245,7 +346,6 @@ async def _store_media(
                     sha256=sha256,
                     media_type=media_type,
                     size_bytes=len(content),
-                    content=content,
                     file_name=file_name,
                 ),
                 dialect=dialect,
@@ -317,27 +417,26 @@ async def import_media_from_url(
             # A redirect could land somewhere the host check already rejected.
             follow_redirects=False,
         ) as client:
-            response = await client.get(request_body.data.url)
+            # Streamed so that the size limit governs how much is ever read, and so
+            # that the address actually connected to can be checked before any of the
+            # body is.
+            async with client.stream("GET", request_body.data.url) as response:
+                if response.is_redirect:
+                    raise HTTPException(
+                        status_code=HTTP_422_UNPROCESSABLE_ENTITY,
+                        detail="The URL redirects. Use the URL the image is served from.",
+                    )
+                if response.status_code >= 400:
+                    raise HTTPException(
+                        status_code=HTTP_422_UNPROCESSABLE_ENTITY,
+                        detail=f"The image URL returned {response.status_code}.",
+                    )
+                _reject_unsafe_peer(response)
+                content = await _read_capped(response, max_bytes)
     except httpx.HTTPError as error:
         raise HTTPException(
             status_code=HTTP_422_UNPROCESSABLE_ENTITY,
             detail=f"Could not fetch the image: {error}.",
-        )
-    if response.is_redirect:
-        raise HTTPException(
-            status_code=HTTP_422_UNPROCESSABLE_ENTITY,
-            detail="The URL redirects. Use the URL the image is served from.",
-        )
-    if response.status_code >= 400:
-        raise HTTPException(
-            status_code=HTTP_422_UNPROCESSABLE_ENTITY,
-            detail=f"The image URL returned {response.status_code}.",
-        )
-    content = response.content
-    if len(content) > max_bytes:
-        raise HTTPException(
-            status_code=HTTP_413_CONTENT_TOO_LARGE,
-            detail=f"Media exceeds the maximum supported size of {max_bytes} bytes.",
         )
     return await _store_media(
         request,
@@ -382,19 +481,21 @@ async def get_media(
         HTTPException: 404 if no media with that digest is stored.
     """
     async with request.app.state.db() as session:
-        media_file = (
-            await session.execute(
-                select(models.MediaFile.media_type, models.MediaFile.content).where(
-                    models.MediaFile.sha256 == sha256
-                )
-            )
-        ).first()
-    if media_file is None:
+        media_type = await session.scalar(
+            select(models.MediaFile.media_type).where(models.MediaFile.sha256 == sha256)
+        )
+    if media_type is None:
         raise HTTPException(
             status_code=HTTP_404_NOT_FOUND,
             detail=f"No media found with digest {sha256}.",
         )
-    media_type, content = media_file
+    # The row records that this media exists and what type it is; the bytes come from
+    # the store, which the sweeper could have emptied since.
+    if (content := await media_store().get(sha256)) is None:
+        raise HTTPException(
+            status_code=HTTP_404_NOT_FOUND,
+            detail=f"Media {sha256} is recorded but its content is no longer stored.",
+        )
     return Response(
         content=content,
         media_type=media_type,
