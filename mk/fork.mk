@@ -15,12 +15,28 @@
 # Variables used here ($(UV), $(CYAN), $(GREEN), $(NC)) come from the root Makefile,
 # which defines them well before the include.
 
-.PHONY: sync-fork sync-fork-check install-gcs
+.PHONY: sync-fork sync-fork-check install-gcs \
+	dockerfile-fork check-dockerfile-fork docker-build-fork
 
 install-gcs: ## Install the Google Cloud Storage SDK, for keeping prompt media in a bucket
 	@echo -e "$(CYAN)Installing Google Cloud Storage support...$(NC)"
 	@$(UV) pip install -r requirements/fork-gcs.txt
 	@echo -e "$(GREEN)✓ Set PHOENIX_MEDIA_GCS_BUCKET to store prompt media in GCS$(NC)"
+
+dockerfile-fork: ## Regenerate Dockerfile.fork from the upstream Dockerfile
+	@$(UV) run python scripts/gen_fork_dockerfile.py
+
+check-dockerfile-fork: ## Fail if Dockerfile.fork is stale against the upstream Dockerfile
+	@$(UV) run python scripts/gen_fork_dockerfile.py --check
+
+FORK_IMAGE ?= phoenix-fork
+
+# Checks freshness first: building a stale Dockerfile.fork would silently ship whatever
+# base image upstream had before its last bump.
+docker-build-fork: check-dockerfile-fork ## Build the fork image; override FORK_IMAGE to retag
+	@echo -e "$(CYAN)Building $(FORK_IMAGE)...$(NC)"
+	@docker build -f Dockerfile.fork -t $(FORK_IMAGE) .
+	@echo -e "$(GREEN)✓ $(FORK_IMAGE) built$(NC)"
 
 sync-fork-check: ## Report what syncing with upstream would conflict on (changes nothing)
 	@$(UV) run python scripts/sync_fork.py --check
