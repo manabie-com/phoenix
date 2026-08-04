@@ -106,7 +106,7 @@ prompt = client.prompts.get(prompt_identifier="prompt_with_image_examples")
 formatted = to_openai(
     prompt,
     variables={"image": Path("cat.png"), "subject": "a cat"},
-    client=client._client,   # only needed for images stored in Phoenix
+    client=client._client,  # only needed for images stored in Phoenix
 )
 
 openai.OpenAI().chat.completions.create(**formatted)
@@ -141,7 +141,7 @@ prompt = client.prompts.get(prompt_identifier="prompt_with_image_examples")
 p = to_genai(
     prompt,
     variables={"image": Path("cat.png"), "subject": "a cat"},
-    client=client._client,   # only needed for images stored in Phoenix
+    client=client._client,  # only needed for images stored in Phoenix
 )
 
 genai.Client().models.generate_content(
@@ -219,16 +219,16 @@ Both can appear in the same message; pass `variables` and `client` together.
 ### Accepted values for an image variable
 
 ```python
-variables={"image": b"\x89PNG\r\n\x1a\n..."}              # raw bytes
-variables={"image": bytearray(...)}                       # bytearray / memoryview
-variables={"image": "iVBORw0KGgoAAAANS..."}               # bare base64 string
-variables={"image": b"iVBORw0KGgoAAAANS..."}              # base64 as bytes
-variables={"image": "data:image/png;base64,iVBOR..."}     # data: URI
-variables={"image": Path("cat.png")}                      # Path
-variables={"image": "/abs/path/cat.png"}                  # path string
-variables={"image": "https://example.com/cat.png"}        # http(s) URL
-variables={"image": "phoenix://media/<sha256>"}           # Phoenix media (needs client=)
-variables={"image": {"url": ..., "media_type": ...}}      # MediaContent mapping
+variables = {"image": b"\x89PNG\r\n\x1a\n..."}  # raw bytes
+variables = {"image": bytearray(...)}  # bytearray / memoryview
+variables = {"image": "iVBORw0KGgoAAAANS..."}  # bare base64 string
+variables = {"image": b"iVBORw0KGgoAAAANS..."}  # base64 as bytes
+variables = {"image": "data:image/png;base64,iVBOR..."}  # data: URI
+variables = {"image": Path("cat.png")}  # Path
+variables = {"image": "/abs/path/cat.png"}  # path string
+variables = {"image": "https://example.com/cat.png"}  # http(s) URL
+variables = {"image": "phoenix://media/<sha256>"}  # Phoenix media (needs client=)
+variables = {"image": {"url": ..., "media_type": ...}}  # MediaContent mapping
 ```
 
 Line-wrapped base64 is fine — whitespace is stripped before decoding.
@@ -306,7 +306,7 @@ prompt already exists.
 If you already have a working provider request, convert it directly:
 
 ```python
-PromptVersion.from_openai({...})                 # a chat.completions payload
+PromptVersion.from_openai({...})  # a chat.completions payload
 PromptVersion.from_anthropic({...})
 PromptVersion.from_google_generativeai({...})
 PromptVersion.from_aws({...})
@@ -340,10 +340,13 @@ client = Client()
 version = PromptVersion(
     [
         {"role": "system", "content": "You are a chatbot"},
-        {"role": "user", "content": [
-            {"type": "text",  "text": "Describe this image"},
-            {"type": "image", "image": {"variable": "image"}},
-        ]},
+        {
+            "role": "user",
+            "content": [
+                {"type": "text", "text": "Describe this image"},
+                {"type": "image", "image": {"variable": "image"}},
+            ],
+        },
     ],
     model_name="gemini-2.5-flash",
     model_provider="GOOGLE",
@@ -382,9 +385,7 @@ To get a `sha256` you upload the bytes first. There is still no client method fo
 from pathlib import Path
 
 data = Path("cat.png").read_bytes()
-response = client._client.post(
-    "v1/media", files={"file": ("cat.png", data, "image/png")}
-)
+response = client._client.post("v1/media", files={"file": ("cat.png", data, "image/png")})
 response.raise_for_status()
 sha256 = response.json()["data"]["sha256"]
 ```

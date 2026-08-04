@@ -260,7 +260,7 @@ def to_openai(
     variables: Mapping[str, Any] = MappingProxyType({}),
     client: Optional[httpx.Client] = None,
     inline_urls: bool = False,
-) -> OpenAIPrompt:
+) -> OpenAIMediaPrompt:
     """Render a Phoenix prompt version into OpenAI chat-completion inputs.
 
     Args:

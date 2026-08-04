@@ -20,7 +20,7 @@ import base64
 import mimetypes
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Mapping, Optional, Union
+from typing import Any, Mapping, Optional, Union, cast
 
 import httpx
 
@@ -160,13 +160,20 @@ def resolve_media(
     """
     # MediaContent mapping: recurse on its url, preferring its declared type.
     if isinstance(value, Mapping):
-        url = value.get("url")
+        # `isinstance` narrows only to Mapping[Unknown, Unknown], so every read
+        # off it is partially unknown under pyright strict. The cast states what
+        # a MediaContent actually is.
+        mapping = cast(Mapping[str, Any], value)
+        url = mapping.get("url")
         if not url:
-            raise MediaResolutionError(f"media mapping has no 'url': {value!r}")
-        return resolve_media(url, media_type=value.get("media_type") or media_type, client=client)
+            raise MediaResolutionError(f"media mapping has no 'url': {mapping!r}")
+        return resolve_media(url, media_type=mapping.get("media_type") or media_type, client=client)
 
     if isinstance(value, (bytes, bytearray, memoryview)):
-        raw = bytes(value)
+        # `memoryview` is generic, and an unparameterized one makes `bytes(value)`
+        # a partially-unknown call under pyright strict. `tobytes()` is precisely
+        # typed, so branch rather than cast.
+        raw = value.tobytes() if isinstance(value, memoryview) else bytes(value)
         if (sniffed := sniff_media_type(raw)) is not None:
             return raw, media_type or sniffed
         # Unrecognisable as image data — it may be base64 *text* handed over as

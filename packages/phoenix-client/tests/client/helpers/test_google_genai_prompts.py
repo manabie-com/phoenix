@@ -1,3 +1,12 @@
+# pyright: reportUnknownMemberType=false, reportUnknownArgumentType=false
+# pyright: reportUnknownVariableType=false, reportUnknownLambdaType=false
+# pyright: reportPrivateUsage=false, reportAttributeAccessIssue=false
+#
+# `google.genai` ships types whose members pyright reads as partially unknown
+# (`part.text`, `inline_data.mime_type`, …), so asserting on a converted part is
+# unavoidably "unknown" under strict mode — a third-party typing gap, not a
+# defect here. `reportPrivateUsage` covers `PromptVersion._loads`, which has no
+# public equivalent for building a version from raw API data.
 """Tests for the fork-owned `google.genai` prompt converter.
 
 A new test file on purpose: assertions added to an upstream test file conflict on
@@ -45,6 +54,9 @@ def make_prompt(
     model_name: str = "gemini-2.5-flash",
     invocation_parameters: Any = None,
 ) -> PromptVersion:
+    # Pinned to Any: `invocation_parameters or {...}` widens to
+    # `Any | dict[Any, Any]`, which the TypedDict item rejects under --strict.
+    params: Any = invocation_parameters or {"type": "google", "google": {}}
     return PromptVersion._loads(  # noqa: SLF001 - no public constructor from raw data
         v1.PromptVersionData(
             model_provider="GOOGLE",
@@ -52,7 +64,7 @@ def make_prompt(
             template={"type": "chat", "messages": list(messages)},
             template_type="CHAT",
             template_format="MUSTACHE",
-            invocation_parameters=invocation_parameters or {"type": "google", "google": {}},
+            invocation_parameters=params,
         )
     )
 

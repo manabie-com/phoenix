@@ -1,3 +1,11 @@
+# pyright: reportUnknownMemberType=false, reportUnknownArgumentType=false
+# pyright: reportUnknownVariableType=false, reportUnknownLambdaType=false
+# pyright: reportPrivateUsage=false, reportAttributeAccessIssue=false
+#
+# The converted messages are OpenAI SDK TypedDicts indexed dynamically in these
+# assertions, which pyright strict reads as unknown. `reportPrivateUsage` covers
+# `PromptVersion._loads`, which has no public equivalent for building a version
+# from raw API data.
 """Tests for the fork-owned OpenAI prompt converter.
 
 A new test file on purpose: assertions added to an upstream test file conflict on
@@ -40,6 +48,9 @@ def make_prompt(
     invocation_parameters: Any = None,
     model_name: str = "gpt-4o",
 ) -> PromptVersion:
+    # Pinned to Any: `invocation_parameters or {...}` widens to
+    # `Any | dict[Any, Any]`, which the TypedDict item rejects under --strict.
+    params: Any = invocation_parameters or {"type": "openai", "openai": {}}
     return PromptVersion._loads(  # noqa: SLF001 - no public constructor from raw data
         v1.PromptVersionData(
             model_provider="OPENAI",
@@ -47,7 +58,7 @@ def make_prompt(
             template={"type": "chat", "messages": list(messages)},
             template_type="CHAT",
             template_format="MUSTACHE",
-            invocation_parameters=invocation_parameters or {"type": "openai", "openai": {}},
+            invocation_parameters=params,
         )
     )
 
