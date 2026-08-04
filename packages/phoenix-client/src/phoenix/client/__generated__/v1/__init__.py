@@ -1349,6 +1349,11 @@ class DynamicToolOutputErrorPart(TypedDict):
     approval: NotRequired[Union[ToolApprovalRequested, ToolApprovalResponded]]
 
 
+class FileContentPart(TypedDict):
+    type: Literal["file"]
+    file: Union[MediaContent, MediaVariable]
+
+
 class FreeformAnnotationConfig(TypedDict):
     type: Literal["FREEFORM"]
     name: str
@@ -1784,7 +1789,13 @@ class PromptMessage(TypedDict):
     content: Union[
         str,
         Sequence[
-            Union[TextContentPart, ToolCallContentPart, ToolResultContentPart, ImageContentPart]
+            Union[
+                TextContentPart,
+                ToolCallContentPart,
+                ToolResultContentPart,
+                ImageContentPart,
+                FileContentPart,
+            ]
         ],
     ]
 
