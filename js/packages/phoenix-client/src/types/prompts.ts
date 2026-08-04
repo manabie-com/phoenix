@@ -159,7 +159,9 @@ export type PromptChatMessage = Extract<
 export type PromptChatMessagePart =
   | components["schemas"]["TextContentPart"]
   | components["schemas"]["ToolCallContentPart"]
-  | components["schemas"]["ToolResultContentPart"];
+  | components["schemas"]["ToolResultContentPart"]
+  | components["schemas"]["ImageContentPart"]
+  | components["schemas"]["FileContentPart"];
 
 export type PromptToolFunction = components["schemas"]["PromptToolFunction"];
 export type PromptToolRaw = components["schemas"]["PromptToolRaw"];

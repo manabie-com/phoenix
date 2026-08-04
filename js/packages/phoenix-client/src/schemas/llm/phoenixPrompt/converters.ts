@@ -38,6 +38,14 @@ export const phoenixMessagePartToOpenAI = phoenixContentPartSchema.transform(
         return null;
       case "tool_result":
         return null;
+      // Media needs an async fetch to inline — a stored part is a
+      // `phoenix://media/<sha256>` reference, and this transform is synchronous
+      // with no client. Handled like the tool parts above until a media-aware
+      // converter exists on this side.
+      case "image":
+        return null;
+      case "file":
+        return null;
       default:
         return assertUnreachable(type);
     }

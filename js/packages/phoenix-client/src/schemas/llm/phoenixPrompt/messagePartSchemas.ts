@@ -2,6 +2,7 @@ import z from "zod";
 
 import type { PromptChatMessagePart } from "../../../types/prompts";
 import { schemaMatches } from "../../../utils/schemaMatches";
+import { filePartSchema, imagePartSchema } from "./mediaPartSchemas";
 
 export const textPartSchema = schemaMatches<
   Extract<PromptChatMessagePart, { type: "text" }>
@@ -54,6 +55,8 @@ export const phoenixContentPartSchema = schemaMatches<PromptChatMessagePart>()(
     textPartSchema,
     toolCallPartSchema,
     toolResultPartSchema,
+    imagePartSchema,
+    filePartSchema,
   ])
 );
 

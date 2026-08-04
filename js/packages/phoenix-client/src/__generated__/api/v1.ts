@@ -2959,6 +2959,16 @@ export interface components {
              */
             experiment_id: string;
         };
+        /** FileContentPart */
+        FileContentPart: {
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            type: "file";
+            /** File */
+            file: components["schemas"]["MediaContent"] | components["schemas"]["MediaVariable"];
+        };
         /**
          * FileUIPart
          * @description A file part of a message.
@@ -4262,7 +4272,7 @@ export interface components {
              */
             role: "user" | "assistant" | "model" | "ai" | "tool" | "system" | "developer";
             /** Content */
-            content: string | (components["schemas"]["TextContentPart"] | components["schemas"]["ToolCallContentPart"] | components["schemas"]["ToolResultContentPart"] | components["schemas"]["ImageContentPart"])[];
+            content: string | (components["schemas"]["TextContentPart"] | components["schemas"]["ToolCallContentPart"] | components["schemas"]["ToolResultContentPart"] | components["schemas"]["ImageContentPart"] | components["schemas"]["FileContentPart"])[];
         };
         /** PromptMoonshotInvocationParameters */
         PromptMoonshotInvocationParameters: {
