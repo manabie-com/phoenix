@@ -11,6 +11,7 @@ import {
   ChatTemplateMessageToolCallPart,
   ChatTemplateMessageToolResultPart,
 } from "@phoenix/components/prompt/ChatTemplateMessageCard";
+import { getMessagePreview } from "@phoenix/components/prompt/chatTemplateMessagePreview";
 import { ChatTemplateMessageMediaPart } from "@phoenix/components/prompt/media/ChatTemplateMessageMediaParts";
 import type { TemplateFormat } from "@phoenix/components/templateEditor/types";
 import { DEFAULT_MODEL_PROVIDER } from "@phoenix/constants/generativeConstants";
@@ -172,7 +173,11 @@ function ChatMessages({
         const isOnlyChild =
           content.length === 1 && content.find(asTextPart) != null;
         return (
-          <ChatTemplateMessageCard key={i} role={message.role as string}>
+          <ChatTemplateMessageCard
+            key={i}
+            role={message.role as string}
+            preview={getMessagePreview(message)}
+          >
             {content.map((part, i) => (
               <ChatMessageContentPart
                 key={i}

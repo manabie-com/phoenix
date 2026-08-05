@@ -1,5 +1,57 @@
 # Changelog
 
+## [19.17.0](https://github.com/Arize-ai/phoenix/compare/arize-phoenix-v19.16.0...arize-phoenix-v19.17.0) (2026-08-04)
+
+
+### Features
+
+* **ui:** AI Query for filter fields ([#15047](https://github.com/Arize-ai/phoenix/issues/15047)) ([920d062](https://github.com/Arize-ai/phoenix/commit/920d06252c8239f51a36cda7e12f5f2ed4bf3682))
+
+
+### Bug Fixes
+
+* **cli:** make px setup's trace verdict the run's result ([#14904](https://github.com/Arize-ai/phoenix/issues/14904)) ([253cfcf](https://github.com/Arize-ai/phoenix/commit/253cfcf891991b2379c9f77557421c2b46de25bf)), closes [#14876](https://github.com/Arize-ai/phoenix/issues/14876)
+* move span and trace link formatting into the PXI system prompt ([#14854](https://github.com/Arize-ai/phoenix/issues/14854)) ([8a749ba](https://github.com/Arize-ai/phoenix/commit/8a749ba5e12b16d2fdf52b78429aac2c4dba705e))
+
+## [19.16.0](https://github.com/Arize-ai/phoenix/compare/arize-phoenix-v19.15.0...arize-phoenix-v19.16.0) (2026-08-04)
+
+
+### Features
+
+* **server:** OpenAI-compatible v1/chat/completions proxy with server-side credentials ([#14980](https://github.com/Arize-ai/phoenix/issues/14980)) ([6ab57db](https://github.com/Arize-ai/phoenix/commit/6ab57dbfe042fc4cc82e291cbbb7ced9940d4400))
+* **ui:** preview card contents while collapsed ([#15027](https://github.com/Arize-ai/phoenix/issues/15027)) ([98b82ba](https://github.com/Arize-ai/phoenix/commit/98b82ba6afe4d912adf121f36028da3ff33e51df))
+
+
+### Bug Fixes
+
+* render exception stack traces in events ([#15028](https://github.com/Arize-ai/phoenix/issues/15028)) ([5ca716e](https://github.com/Arize-ai/phoenix/commit/5ca716eabb30b642775342c2571181d915cd4489))
+* **ui:** carry the time range forward from the project list into project details ([#15041](https://github.com/Arize-ai/phoenix/issues/15041)) ([d9421a4](https://github.com/Arize-ai/phoenix/commit/d9421a48e01c884feb828e49b803b28265b6ce97))
+
+
+### Performance Improvements
+
+* **ui:** parallelize span export fetches and stream downloads to disk ([#14993](https://github.com/Arize-ai/phoenix/issues/14993)) ([b9f2fa3](https://github.com/Arize-ai/phoenix/commit/b9f2fa3febcd95c9dba3671374ad0673166f56fb))
+
+## [19.15.0](https://github.com/Arize-ai/phoenix/compare/arize-phoenix-v19.14.0...arize-phoenix-v19.15.0) (2026-08-03)
+
+
+### Features
+
+* **project:** defer annotation metric chart loading ([#14968](https://github.com/Arize-ai/phoenix/issues/14968)) ([8e81af0](https://github.com/Arize-ai/phoenix/commit/8e81af000e11f1fda9c33f710346f4fd917ce066))
+* **project:** fetch annotation metric charts independently ([#14938](https://github.com/Arize-ai/phoenix/issues/14938)) ([8c49a9d](https://github.com/Arize-ai/phoenix/commit/8c49a9d9919b8f3fb2b2516453fb91587d21f790))
+
+## [19.14.0](https://github.com/Arize-ai/phoenix/compare/arize-phoenix-v19.13.0...arize-phoenix-v19.14.0) (2026-08-03)
+
+
+### Features
+
+* **evals:** add hallucination evaluator ([#14708](https://github.com/Arize-ai/phoenix/issues/14708)) ([1aa1a84](https://github.com/Arize-ai/phoenix/commit/1aa1a8454b6524a9e7618f3c9970ae9466df67d2))
+
+
+### Bug Fixes
+
+* **traces:** render ReasoningPart in gen_ai message flattening ([#14995](https://github.com/Arize-ai/phoenix/issues/14995)) ([05d5999](https://github.com/Arize-ai/phoenix/commit/05d59990cd5050c0effc9e17eaf2d97ec28a69b4)), closes [#14962](https://github.com/Arize-ai/phoenix/issues/14962)
+
 ## [19.13.0](https://github.com/Arize-ai/phoenix/compare/arize-phoenix-v19.12.0...arize-phoenix-v19.13.0) (2026-08-01)
 
 

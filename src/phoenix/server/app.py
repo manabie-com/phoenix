@@ -198,6 +198,7 @@ NEW_DB_AGE_THRESHOLD_MINUTES = 2
 
 ProjectName: TypeAlias = str
 _Callback: TypeAlias = Callable[[], Union[None, Awaitable[None]]]
+_WelcomeMessage: TypeAlias = Callable[[SystemSettings], str]
 
 
 def import_object_from_file(file_path: str, object_name: str) -> Any:
@@ -643,7 +644,7 @@ def _lifespan(
     initial_annotation_precursors: Iterable[AnnotationPrecursor] = (),
     scaffolder_config: Optional[ScaffolderConfig] = None,
     grpc_interceptors: Iterable[ServerInterceptor] = (),
-    welcome_message: str | None = None,
+    welcome_message: Optional[_WelcomeMessage] = None,
     docs_mcp_server: Optional[MCPToolset[Any]] = None,
 ) -> StatefulLifespan[FastAPI]:
     @contextlib.asynccontextmanager
@@ -733,7 +734,12 @@ def _lifespan(
                 await stack.enter_async_context(token_store)
             _warn_if_missing_aioboto3()
             if welcome_message:
-                print(welcome_message, flush=True)
+                # The banner is cosmetic and renders after migrations have run and
+                # ports are bound, so a defect in it must not abort a started server.
+                try:
+                    print(welcome_message(system_settings), flush=True)
+                except Exception:
+                    logger.exception("Failed to render the startup banner")
             yield {
                 "event_queue": dml_event_handler,
                 "enqueue_annotations": enqueue_annotations,
@@ -931,7 +937,7 @@ def create_app(
     bulk_inserter_factory: Optional[Callable[..., BulkInserter]] = None,
     allowed_origins: Optional[list[str]] = None,
     management_url: Optional[str] = None,
-    welcome_message: str | None = None,
+    welcome_message: Optional[_WelcomeMessage] = None,
 ) -> FastAPI:
     verify_server_environment_variables()
     _validate_oauth2_idp_names(oauth2_client_configs or [])
