@@ -327,58 +327,19 @@ jobs:
           name: arize-phoenix-sqlean-sources
           path: packages/phoenix-sqlean
 
+  # phoenix-sqlean-ci.yml calls the same workflow, so a PR runs this build. No
+  # cibw-* overrides here: the shipped matrix is cibuildwheel.toml's business.
   build-sqlean:
-    name: Build arize-phoenix-sqlean (${{ matrix.os }})
-    runs-on: ${{ matrix.os }}
+    name: Build arize-phoenix-sqlean
     needs: sqlean-sources
     if: needs.sqlean-sources.result == 'success' && needs.sqlean-sources.outputs.needed == 'true'
     permissions:
       contents: read
-    strategy:
-      fail-fast: false
-      matrix:
-        os:
-          - ubuntu-latest
-          - macos-latest
-          - windows-latest
-    steps:
-      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
-        with:
-          name: arize-phoenix-sqlean-sources
-          path: pkg
-      - name: Set up QEMU for aarch64 wheels
-        if: runner.os == 'Linux'
-        uses: docker/setup-qemu-action@c7c53464625b32c7a7e944ae62b3e17d2b600130 # v3.7.0
-        with:
-          platforms: arm64
-      - name: Build wheels
-        uses: pypa/cibuildwheel@9c00cb4f6b517705a3794b22395aedc36257242c # v3.2.1
-        with:
-          package-dir: pkg
-        env:
-          CIBW_ARCHS_LINUX: x86_64 aarch64
-          CIBW_ARCHS_MACOS: x86_64 arm64
-          CIBW_ARCHS_WINDOWS: AMD64 ARM64
-          CIBW_BUILD: "cp310-macosx* cp311-macosx* cp312-macosx* cp313-macosx* cp314-macosx* cp310-manylinux* cp311-manylinux* cp312-manylinux* cp313-manylinux* cp314-manylinux* cp310-win* cp311-win* cp312-win* cp313-win* cp314-win*"
-          # Import and exercise each wheel before it is uploaded. The command
-          # runs in a temp dir against the installed wheel, not the source
-          # tree, so CIBW_TEST_SOURCES must supply everything the suite reads
-          # from the working directory: tests/ plus setup.py and README.md,
-          # because tests/extensions.py imports SQLEAN_VERSION from setup.py
-          # and setup.py reads README.md at import time (hence setuptools).
-          # cibuildwheel skips tests for cross-compiled wheels (macOS x86_64,
-          # win_arm64); the native ARM legs in phoenix-sqlean-ci.yml cover those.
-          CIBW_TEST_SOURCES: tests setup.py README.md
-          CIBW_TEST_REQUIRES: setuptools==83.0.0
-          CIBW_TEST_COMMAND: python -m tests
-          MACOSX_DEPLOYMENT_TARGET: "10.15"
-      - name: Build sdist
-        if: runner.os == 'Linux'
-        run: pipx run build==1.5.0 --sdist --outdir wheelhouse pkg
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
-        with:
-          name: arize-phoenix-sqlean-dist-${{ matrix.os }}
-          path: wheelhouse/
+    uses: ./.github/workflows/phoenix-sqlean-build.yml
+    with:
+      sources-artifact: arize-phoenix-sqlean-sources
+      runners: '["ubuntu-latest", "macos-latest", "windows-latest"]'
+      dist-artifact-prefix: arize-phoenix-sqlean-dist
 
   publish-sqlean:
     name: Publish arize-phoenix-sqlean
@@ -445,8 +406,27 @@ jobs:
 
   slack:
     name: Slack notification
-    needs: [list-python-packages, publish-phoenix, publish-packages, publish-sqlean, trigger-version-updates]
-    if: always() && inputs.feature_branch == '' && (needs.publish-phoenix.result != 'skipped' || needs.publish-packages.result != 'skipped' || needs.publish-sqlean.result != 'skipped')
+    # Depends on the build jobs too, not just the publish ones: a publish job
+    # is gated on its build succeeding, so a failed build leaves it *skipped*
+    # rather than failed. Watching only publish results therefore reports
+    # success for a package that never shipped, as long as some other package
+    # published in the same run.
+    needs:
+      - list-python-packages
+      - build-phoenix
+      - publish-phoenix
+      - build-packages
+      - publish-packages
+      - sqlean-sources
+      - build-sqlean
+      - publish-sqlean
+      - trigger-version-updates
+    if: >-
+      always() && inputs.feature_branch == '' &&
+      (contains(needs.*.result, 'failure')
+      || needs.publish-phoenix.result != 'skipped'
+      || needs.publish-packages.result != 'skipped'
+      || needs.publish-sqlean.result != 'skipped')
     runs-on: ubuntu-latest
     permissions: {}
     steps:
@@ -456,9 +436,10 @@ jobs:
           PHOENIX_RESULT: ${{ needs.publish-phoenix.result }}
           PACKAGES_RESULT: ${{ needs.publish-packages.result }}
           SQLEAN_RESULT: ${{ needs.publish-sqlean.result }}
+          ANY_FAILURE: ${{ contains(needs.*.result, 'failure') }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
-          if [ "$PHOENIX_RESULT" = "failure" ] || [ "$PACKAGES_RESULT" = "failure" ] || [ "$SQLEAN_RESULT" = "failure" ]; then
+          if [ "$ANY_FAILURE" = "true" ]; then
             {
               echo "text<<EOF"
               echo "🚨🚨🚨 PYPI Publication Failed 🚨🚨🚨"
