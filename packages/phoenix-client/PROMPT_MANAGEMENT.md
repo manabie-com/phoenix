@@ -53,6 +53,11 @@ prompt = client.prompts.get(prompt_version_id="UHJvbXB0VmVyc2lvbjox")
 Pin by `tag` in application code, not by version id. Promoting a new version
 becomes a tag move with no deploy.
 
+To read what a prompt actually says, use `prompt.messages` — see
+"[Reading a prompt's messages](#reading-a-prompts-messages)". To find prompts and
+versions in the first place, see
+"[Listing and deleting prompts](#listing-and-deleting-prompts)".
+
 ---
 
 ## Running a text prompt
@@ -429,21 +434,21 @@ else, including the `/v1/media/<sha256>` REST path:
 {"type": "image", "image": {"url": f"phoenix://media/{sha256}", "media_type": "image/png"}}
 ```
 
-To get a `sha256` you upload the bytes first. There is still no client method for
-`POST /v1/media`, so go through the underlying httpx client:
+To get a `sha256` you upload the bytes first:
 
 ```python
 from pathlib import Path
 
-data = Path("cat.png").read_bytes()
-response = client._client.post("v1/media", files={"file": ("cat.png", data, "image/png")})
-response.raise_for_status()
-sha256 = response.json()["data"]["sha256"]
+stored = client.media.upload(Path("cat.png"))
+sha256 = stored["sha256"]
+
+{"type": "image", "image": {"url": stored["url"], "media_type": stored["media_type"]}}
 ```
 
-`POST /v1/media/import` takes `{"data": {"url": ...}}` to import from a URL
-instead. Both return the same `{"data": {"sha256", "media_type", "size_bytes",
-"url"}}` body.
+`stored["url"]` is already the `phoenix://media/<sha256>` form the template
+wants, so there is usually no need to touch the digest yourself.
+
+See "[Storing media](#storing-media)" below for `import_from_url` and `get`.
 
 Alternatively skip the upload and inline the bytes in the template itself:
 
@@ -470,19 +475,110 @@ A **variable** part carries no `media_type`, so nothing is validated at write
 time — the type is determined when a run resolves the value. That is why an
 invalid image only fails at run time, not at `create()`.
 
-### Two caveats when authoring media prompts
-
-**The generated client types lag the server.** `FileContentPart` exists in
-`schemas/openapi.json` and in the server models, but not in
-`src/phoenix/client/__generated__/v1/__init__.py`. A `{"type": "file", ...}` part
-works at run time and your type checker will still reject it. The fix is
-regenerating the client, never hand-editing the generated file.
+### One caveat when authoring media prompts
 
 **Both converters run file parts.** A `{{contract_pdf}}` document input is
 resolved and inlined the same way an image is. Only `application/pdf` is accepted
 — every provider Phoenix supports takes exactly that one document type — and a
 non-PDF value raises `MediaResolutionError` naming the type it got, rather than
 letting the provider return an opaque 400.
+
+---
+
+## Storing media
+
+`client.media` covers the three media endpoints. `AsyncClient` exposes the same
+methods with `await`.
+
+| method | what it does |
+|---|---|
+| `client.media.upload(media, *, file_name=None, media_type=None)` | sends bytes from **this** process |
+| `client.media.import_from_url(url)` | has the **server** fetch a public URL once |
+| `client.media.get(sha256)` | reads stored bytes back |
+
+```python
+from pathlib import Path
+
+stored = client.media.upload(Path("cat.png"))
+stored["sha256"]  # digest
+stored["url"]  # phoenix://media/<sha256> — what a template references
+stored["media_type"]  # read from the bytes by the server, not from what you sent
+stored["size_bytes"]
+```
+
+`upload` accepts everything an image variable accepts — bytes, `bytearray`,
+`memoryview`, base64, a `data:` URI, a `Path`, a path string, an `http(s)` URL,
+or a `MediaContent` mapping. It is the same resolver, so anything you can pass as
+a variable you can also store.
+
+**`upload` and `import_from_url` differ in who fetches.** Given an `http(s)` URL,
+`upload` downloads it here and sends the bytes; `import_from_url` hands the URL to
+the server. Use the latter when only the server can reach the host, or to keep the
+download off your network. The server refuses any URL that does not resolve to the
+public internet, and does not keep the URL — the prompt references stored media, so
+a run never depends on the third-party host again.
+
+Storage is content-addressed, so uploading the same file twice returns the same
+digest and stores one copy.
+
+```python
+content, media_type = client.media.get(sha256)
+Path("cat.png").write_bytes(content)
+```
+
+`get` returns both because a digest names content, not a format. The result also
+has `.content` and `.media_type` if you prefer to read them by name.
+
+---
+
+## Reading a prompt's messages
+
+`prompt.messages` returns the message templates, unrendered:
+
+```python
+prompt = client.prompts.get(prompt_identifier="my-prompt")
+
+for message in prompt.messages:
+    print(message["role"], message["content"])
+```
+
+Use it to *inspect* a prompt; use `format()` or the converters to *run* one. It is
+deliberately the raw template — `{{topic}}` is still `{{topic}}`, and a media
+variable is still `{"type": "image", "image": {"variable": "image"}}`.
+
+This is the supported replacement for reading `prompt._template["messages"]`. The
+converters are not a substitute: `to_genai` and `to_openai` resolve media as they
+convert, so on a prompt that declares a media variable they raise for a caller who
+only wanted the text.
+
+The returned sequence is a copy, so appending to it does not alter the version.
+The message mappings inside it are not copied — treat them as read-only.
+
+---
+
+## Listing and deleting prompts
+
+```python
+for prompt in client.prompts.list():
+    print(prompt["id"], prompt["name"])
+
+versions = client.prompts.versions(prompt_identifier="my-prompt")  # newest first
+print(versions[0].id, len(versions[0].messages))
+
+client.prompts.delete(prompt_identifier="my-prompt")
+```
+
+`versions()` returns the same rich `PromptVersion` objects `get()` does, so each
+one can be formatted or read through `.messages`. Both `list()` and `versions()`
+follow pagination for you.
+
+`delete()` removes the prompt and **all** of its versions, tags, and labels. It
+raises `ValueError` if the prompt does not exist, as `get()` does.
+
+> **There is no per-version delete**, here or server-side. Since `create()`
+> *appends* a version to an existing name rather than replacing it, removing one
+> mistaken version means deleting the prompt and its whole history. Seed
+> carefully.
 
 ---
 
@@ -520,27 +616,28 @@ Anthropic has no fork converter yet, so a media-bearing prompt cannot be run
 against Anthropic models at all, even though the server supports images and PDF
 for Anthropic in the playground.
 
-### Missing client methods
+### Client coverage of the prompt and media endpoints
 
 | capability | server endpoint | client |
 |---|---|---|
-| list prompts | `GET /v1/prompts` | missing |
-| list a prompt's versions | `GET /v1/prompts/{id}/versions` | missing |
-| delete a prompt | `DELETE /v1/prompts/{id}` | missing |
+| list prompts | `GET /v1/prompts` | `client.prompts.list()` |
+| list a prompt's versions | `GET /v1/prompts/{id}/versions` | `client.prompts.versions(...)` |
+| delete a prompt | `DELETE /v1/prompts/{id}` | `client.prompts.delete(...)` |
+| upload media | `POST /v1/media` | `client.media.upload(...)` |
+| import media from a URL | `POST /v1/media/import` | `client.media.import_from_url(...)` |
+| fetch media | `GET /v1/media/{sha256}` | `client.media.get(...)` |
 | delete a version tag | `DELETE /v1/prompt_versions/{id}/tags/{tag}` | missing |
-| upload media | `POST /v1/media` | missing |
-| import media from a URL | `POST /v1/media/import` | missing |
-| fetch media | `GET /v1/media/{sha256}` | missing |
+| delete a single prompt **version** | — | does not exist server-side either |
 
-Media can be *referenced* (`to_genai` fetches it) but not *created* from the
-SDK — upload images through the UI for now.
+Per-version delete is the gap worth knowing about: `create()` appends a version to
+an existing name, so a mistaken seed cannot be removed without deleting the whole
+prompt and its history.
 
 ### Schema
 
-Prompt content parts are `text`, `tool_call`, `tool_result`, `image`, and
-`file` — the server supports files, contrary to what the absence of
-`FileContentPart` in the generated client types suggests. See "Two caveats when
-authoring media prompts" above.
+Prompt content parts are `text`, `tool_call`, `tool_result`, `image`, and `file`.
+All five are present in the generated client types, `FileContentPart` included, so
+a `{"type": "file", ...}` part type-checks.
 
 ---
 
@@ -566,10 +663,14 @@ cd src && mypy --strict --follow-untyped-imports \
 
 Media resolution is shared by both converters, in
 `helpers/prompt_media.py`, so provider behaviour cannot drift on the parts that
-should be identical.
+should be identical. `client.media.upload()` resolves through the same code, which
+is why it accepts exactly the values an image variable accepts.
 
 Tests:
 
 * `tests/client/helpers/test_openai_media_prompts.py` — 16 tests
 * `tests/client/helpers/test_google_genai_prompts.py` — 32 tests, skipped when
   `google-genai` is absent
+* `tests/client/resources/media/test_media.py` — 23 tests
+* `tests/client/resources/prompts/test_prompt_management.py` — 17 tests
+* `tests/client/types/test_prompt_messages.py` — 9 tests

@@ -38,6 +38,7 @@ from phoenix.client.helpers.sdk.openai.chat import (
 from phoenix.client.helpers.sdk.openai.chat import (
     to_chat_messages_and_kwargs as to_messages_openai,
 )
+from phoenix.client.types.prompt_messages import PromptMessagesMixin
 from phoenix.client.utils.template_formatters import TemplateFormatter
 
 if TYPE_CHECKING:
@@ -48,7 +49,7 @@ if TYPE_CHECKING:
     from openai.types.chat.completion_create_params import CompletionCreateParamsBase
 
 
-class PromptVersion:
+class PromptVersion(PromptMessagesMixin):
     """
     Represents a version of a prompt for different model providers.
     """
@@ -214,6 +215,7 @@ class PromptVersion:
             "format",
             "from_openai",
             "from_anthropic",
+            "messages",
         ]
 
     @property

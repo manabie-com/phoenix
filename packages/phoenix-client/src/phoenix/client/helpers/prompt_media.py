@@ -30,8 +30,10 @@ __all__ = [
     "SUPPORTED_FILE_MEDIA_TYPES",
     "MediaReference",
     "ResolvedSource",
+    "media_file_name",
     "media_reference",
     "media_value_is_absent",
+    "reject_non_media",
     "note_omitted_media",
     "resolve_media_source",
     "ResolvedMedia",
@@ -145,7 +147,7 @@ _NON_MEDIA_PREFIXES = (
 )
 
 
-def _reject_non_media(url: str, data: bytes, header_type: Optional[str]) -> None:
+def reject_non_media(url: str, data: bytes, header_type: Optional[str]) -> None:
     """Raise when a fetch came back as something that is plainly not media.
 
     A 200 is not proof the URL was right. Phoenix serves its single-page app for
@@ -175,12 +177,12 @@ def fetch_url(url: str, client: Optional[httpx.Client]) -> tuple[bytes, Optional
     """GET `url`, reusing the caller's client so Phoenix auth and base_url apply.
 
     Raises:
-        MediaResolutionError: The response was not media. See `_reject_non_media`.
+        MediaResolutionError: The response was not media. See `reject_non_media`.
     """
     response = client.get(url) if client is not None else httpx.get(url, follow_redirects=True)
     response.raise_for_status()
     header_type = response.headers.get("content-type")
-    _reject_non_media(url, response.content, header_type)
+    reject_non_media(url, response.content, header_type)
     return response.content, header_type
 
 
@@ -287,7 +289,7 @@ def resolve_media(
     raise MediaResolutionError(f"unsupported media value of type {type(value).__name__}")
 
 
-def _file_name(reference: Any, media_type: str) -> str:
+def media_file_name(reference: Any, media_type: str) -> str:
     """Best-effort filename for a resolved media reference.
 
     OpenAI requires a filename alongside file data — it has no other way to hint
@@ -434,7 +436,7 @@ def resolve_media_source(
         )
 
     return ResolvedSource(
-        data=data, media_type=media_type, filename=_file_name(reference.value, media_type)
+        data=data, media_type=media_type, filename=media_file_name(reference.value, media_type)
     )
 
 

@@ -7,6 +7,10 @@ import httpx
 from httpx import HTTPStatusError
 
 from phoenix.client.__generated__ import v1
+from phoenix.client.resources.prompts.management import (
+    AsyncPromptsManagementMixin,
+    PromptsManagementMixin,
+)
 from phoenix.client.types.prompts import PromptVersion
 from phoenix.client.utils.encode_path_param import encode_path_param
 from phoenix.client.utils.server_requirements import (
@@ -17,7 +21,7 @@ from phoenix.client.utils.server_requirements import (
 logger = logging.getLogger(__name__)
 
 
-class Prompts:
+class Prompts(PromptsManagementMixin):
     """Provides methods for interacting with prompt resources.
 
     This class allows you to retrieve and create prompt versions.
@@ -305,7 +309,7 @@ class PromptVersionTags:
         return list(cast(v1.GetPromptVersionTagsResponseBody, response.json())["data"])
 
 
-class AsyncPrompts:
+class AsyncPrompts(AsyncPromptsManagementMixin):
     """
     Provides asynchronous methods for interacting with prompt resources.
 

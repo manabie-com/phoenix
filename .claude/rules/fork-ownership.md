@@ -65,6 +65,11 @@ a 1–3 line delegation left in upstream's `playground_clients.py`.
 - prompt and trace rendering → `app/src/components/prompt/media/`,
   `app/src/pages/trace/span/media/`
 - fork-only make targets → `mk/fork.mk`
+- client resources for fork endpoints → `packages/phoenix-client/src/phoenix/client/resources/media/`
+- client methods upstream's resource classes lack → a module beside them exporting
+  mixins, e.g. `resources/prompts/management.py`; upstream's class then gains a base
+  class instead of a block of methods
+- public accessors on upstream client types → `packages/phoenix-client/src/phoenix/client/types/prompt_messages.py`
 - test helpers → a `__fixtures__/` directory beside the module they are about
 
 ## Tests
@@ -94,8 +99,12 @@ git diff --numstat upstream/main
 ```
 
 Lines in files upstream owns are the entire conflict surface; lines in fork-only files are
-free. Keep the ratio moving toward fork-only. Current: 30 upstream-owned files carrying
-+607/−108 hand-written lines, against ~12,400 in fork-only files.
+free. Keep the ratio moving toward fork-only. Current: 44 upstream-owned files carrying
++685/−119 hand-written lines, against ~19,800 in fork-only files.
+
+Measured against `git merge-base HEAD upstream/main`, excluding generated artifacts and
+lockfiles. `git diff --numstat upstream/main` overstates it once upstream has moved on
+past the last sync, since it then counts upstream's own changes as fork drift.
 
 ## See also
 

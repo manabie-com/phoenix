@@ -6,6 +6,7 @@ import httpx
 
 from phoenix.client.resources.datasets import AsyncDatasets, Datasets
 from phoenix.client.resources.experiments import AsyncExperiments, Experiments
+from phoenix.client.resources.media import AsyncMediaClientMixin, MediaClientMixin
 from phoenix.client.resources.projects import AsyncProjects, Projects
 from phoenix.client.resources.prompts import AsyncPrompts, Prompts
 from phoenix.client.resources.sessions import AsyncSessions, Sessions
@@ -17,7 +18,7 @@ from phoenix.client.utils.server_requirements import AsyncServerVersionGuard, Se
 _DEFAULT_CLIENT_TIMEOUT = httpx.Timeout(connect=10.0, read=30.0, write=10.0, pool=10.0)
 
 
-class Client:
+class Client(MediaClientMixin):
     def __init__(
         self,
         *,
@@ -133,7 +134,7 @@ class Client:
         return self._experiments
 
 
-class AsyncClient:
+class AsyncClient(AsyncMediaClientMixin):
     def __init__(
         self,
         *,
