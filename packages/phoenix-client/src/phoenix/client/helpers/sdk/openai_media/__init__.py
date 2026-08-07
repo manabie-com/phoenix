@@ -69,6 +69,8 @@ from phoenix.client.__generated__ import v1
 from phoenix.client.helpers.prompt_media import (
     SUPPORTED_FILE_MEDIA_TYPES,
     MediaResolutionError,
+    media_reference,
+    note_omitted_media,
     resolve_media,
     resolve_media_source,
     to_data_uri,
@@ -111,11 +113,23 @@ class OpenAIMediaPrompt(OpenAIPrompt):
     """
 
     _unsupported: tuple[str, ...] = field(default=(), repr=False)
+    _omitted_media: tuple[str, ...] = field(default=(), repr=False)
 
     @property
     def unsupported_parts(self) -> tuple[str, ...]:
         """Content-part types that were present but could not be converted."""
         return self._unsupported
+
+    @property
+    def omitted_media(self) -> tuple[str, ...]:
+        """Media variables the template declares that this run did not supply.
+
+        Kept apart from `unsupported_parts`: an empty optional slot is a normal
+        outcome, not a conversion failure, and conflating the two would make a
+        deliberately text-only run look broken. Reading it is how a caller who
+        expected to pass an image catches a misspelled key.
+        """
+        return self._omitted_media
 
 
 def _string_variables(variables: Mapping[str, Any]) -> Mapping[str, str]:
@@ -158,33 +172,26 @@ def _image_url(
     variables: Mapping[str, Any],
     client: Optional[httpx.Client],
     inline_urls: bool,
-) -> str:
+) -> Optional[str]:
     """Produce the value for an OpenAI `image_url.url` field.
 
     A public http(s) reference is returned as-is so OpenAI fetches it directly;
-    anything else is resolved to bytes and inlined as a data URI.
+    anything else is resolved to bytes and inlined as a data URI. `None` means the
+    image's variable was not supplied and the slot stays empty.
     """
-    if "variable" in image:
-        name = image["variable"]
-        if name not in variables:
-            raise MediaResolutionError(
-                f"prompt expects an image for variable {name!r}; pass it as "
-                f"variables={{{name!r}: <bytes | base64 | path | url>}}"
-            )
-        reference: Any = variables[name]
-        declared: Optional[str] = None
-    else:
-        reference = image.get("url")
-        declared = image.get("media_type")
+    if (reference := media_reference(image, variables)) is None:
+        return None
 
     if (
         not inline_urls
-        and isinstance(reference, str)
-        and reference.startswith(("http://", "https://"))
+        and isinstance(reference.value, str)
+        and reference.value.startswith(("http://", "https://"))
     ):
-        return reference
+        return reference.value
 
-    data, media_type = resolve_media(reference, media_type=declared, client=client)
+    data, media_type = resolve_media(
+        reference.value, media_type=reference.media_type, client=client
+    )
     return to_data_uri(data, media_type)
 
 
@@ -192,7 +199,7 @@ def _file_part(
     source: Mapping[str, Any],
     variables: Mapping[str, Any],
     client: Optional[httpx.Client],
-) -> dict[str, Any]:
+) -> Optional[dict[str, Any]]:
     """Build a Chat Completions `file` part.
 
     Unlike an image, a document must carry a filename — OpenAI has no other way
@@ -201,6 +208,8 @@ def _file_part(
 
     A document is always inlined: `file_data` takes a data URL, not a fetchable
     URL, so there is no pass-through equivalent to the image path.
+
+    `None` means the document's variable was not supplied and the slot stays empty.
     """
     resolved = resolve_media_source(
         source,
@@ -211,6 +220,8 @@ def _file_part(
         # named media type beats an opaque provider 400.
         supported_media_types=SUPPORTED_FILE_MEDIA_TYPES,
     )
+    if resolved is None:
+        return None
     return {
         "type": "file",
         "file": {
@@ -227,13 +238,14 @@ def _media_message(
     client: Optional[httpx.Client],
     inline_urls: bool,
     unsupported: list[str],
+    omitted: list[str],
 ) -> Iterator[Any]:
     """Convert a message containing at least one image or file part.
 
     Media is only meaningful on a user turn — that is what the prompt UI produces
     under "Image Input" — so the result is always a user message. Anything that
     cannot be represented there is recorded in `unsupported` rather than dropped
-    without a trace.
+    without a trace, and a slot this run left empty is recorded in `omitted`.
     """
     content: list[dict[str, Any]] = []
     for part in cast(Sequence[Any], message["content"]):
@@ -242,15 +254,28 @@ def _media_message(
             content.append(
                 {"type": "text", "text": _format_text(part["text"], variables, formatter)}
             )
-        elif kind == "image":
-            url = _image_url(cast(Mapping[str, Any], part["image"]), variables, client, inline_urls)
-            content.append({"type": "image_url", "image_url": {"url": url}})
-        elif kind == "file":
-            content.append(_file_part(cast(Mapping[str, Any], part["file"]), variables, client))
+        elif kind in _MEDIA_KINDS:
+            source = cast(Mapping[str, Any], part[kind])
+            converted = (
+                _image_url(source, variables, client, inline_urls)
+                if kind == "image"
+                else _file_part(source, variables, client)
+            )
+            if converted is None:
+                note_omitted_media(omitted, source)
+            elif kind == "image":
+                content.append({"type": "image_url", "image_url": {"url": converted}})
+            else:
+                content.append(cast(dict[str, Any], converted))
         else:
             # Tool parts are not representable on a user turn. Upstream skips
             # them silently here; recording them keeps the omission visible.
             unsupported.append(f"{kind} alongside media")
+    if not content:
+        # Every part was a media slot this run left empty. A user turn with no
+        # content is rejected outright by the API, so the message goes too — the
+        # message only ever existed to carry that media.
+        return
     yield {"role": "user", "content": content}
 
 
@@ -268,7 +293,8 @@ def to_openai(
         variables: Values for the prompt's template variables. String values
             substitute into text; an image variable (`{{image}}` in the UI) takes
             raw bytes, base64 (str or bytes), a filesystem path, a `data:` URI, an
-            `http(s)` URL, or a `MediaContent` mapping.
+            `http(s)` URL, or a `MediaContent` mapping. A media variable left out
+            is an empty slot, not an error — see `omitted_media`.
         client: The httpx client used to fetch image URLs. Required for images
             stored in Phoenix — pass `Client()._client`.
         inline_urls: Inline public `http(s)` images as data URIs instead of
@@ -276,11 +302,13 @@ def to_openai(
 
     Returns:
         An `OpenAIPrompt`, which is a Mapping — splat it into
-        `chat.completions.create(**result)`.
+        `chat.completions.create(**result)`. Check `omitted_media` for media
+        slots this run left empty.
 
     Raises:
-        MediaResolutionError: An image reference could not be turned into bytes,
-            including when a required image variable was not supplied.
+        MediaResolutionError: An image reference was supplied but could not be
+            turned into bytes. A variable left unsupplied is not an error — its
+            part is skipped and its name reported in `omitted_media`.
     """
     obj = prompt._dumps()  # noqa: SLF001 - no public accessor for the raw data
     formatter = to_formatter(obj)
@@ -295,13 +323,16 @@ def to_openai(
 
     out: list[Any] = []
     unsupported: list[str] = []
+    omitted: list[str] = []
     for message in messages:
         if _has_media(message):
             out.extend(
-                _media_message(message, variables, formatter, client, inline_urls, unsupported)
+                _media_message(
+                    message, variables, formatter, client, inline_urls, unsupported, omitted
+                )
             )
         else:
             # No media: upstream's conversion is authoritative.
             out.extend(_MessageConversion.to_openai(message, string_variables, formatter))
 
-    return OpenAIMediaPrompt(out, _to_model_kwargs(obj), tuple(unsupported))
+    return OpenAIMediaPrompt(out, _to_model_kwargs(obj), tuple(unsupported), tuple(omitted))

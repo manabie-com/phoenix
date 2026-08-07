@@ -19,12 +19,12 @@ import {
   AttachmentRemove,
   Attachments,
 } from "@phoenix/components/ai/attachment";
+import { useMediaStore } from "@phoenix/hooks/useMediaStore";
 import type { MediaKind } from "@phoenix/schemas/mediaPartSchemas";
 import {
-  importMediaFromUrl,
   mediaDisplayName,
   resolveMediaUrl,
-  uploadMedia,
+  type UploadedMedia,
 } from "@phoenix/utils/mediaUtils";
 
 const hiddenFileInputCSS = css`
@@ -92,47 +92,43 @@ export function MediaVariableEditor({
   onChange: (value: string) => void;
 }) {
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const [isBusy, setIsBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const {
+    isBusy,
+    error,
+    setError,
+    upload: storeFile,
+    importUrl: storeUrl,
+  } = useMediaStore();
   const [urlDraft, setUrlDraft] = useState("");
   const [mediaType, setMediaType] = useState<string | null>(null);
   const copy = KIND_COPY[kind];
 
-  /** Stores the media, whether it arrived as a file or a URL. */
-  const store = useCallback(
-    async (
-      fetchMedia: () => Promise<{ url: string; mediaType: string }>,
-      fallback: string
-    ) => {
-      setIsBusy(true);
-      setError(null);
-      try {
-        const media = await fetchMedia();
-        setMediaType(media.mediaType);
-        onChange(media.url);
-        setUrlDraft("");
-      } catch (storeError) {
-        setError(storeError instanceof Error ? storeError.message : fallback);
-      } finally {
-        setIsBusy(false);
+  /** Records what was stored, whether it arrived as a file or a URL. */
+  const accept = useCallback(
+    (media: UploadedMedia | null) => {
+      if (!media) {
+        return;
       }
+      setMediaType(media.mediaType);
+      onChange(media.url);
+      setUrlDraft("");
     },
     [onChange]
   );
 
   const upload = useCallback(
-    (file: File) => store(() => uploadMedia(file), copy.uploadFailed),
-    [store, copy]
+    async (file: File) => accept(await storeFile(file, copy.uploadFailed)),
+    [storeFile, copy, accept]
   );
 
-  const importUrl = useCallback(() => {
+  const importUrl = useCallback(async () => {
     const trimmed = urlDraft.trim();
     if (!trimmed) {
       setError(copy.urlMissing);
       return;
     }
-    void store(() => importMediaFromUrl(trimmed), copy.importFailed);
-  }, [urlDraft, store, copy]);
+    accept(await storeUrl(trimmed, copy.importFailed));
+  }, [urlDraft, storeUrl, copy, accept, setError]);
 
   const hasMedia = value !== "";
   // The media type is only known once something has been stored this session; a
@@ -228,14 +224,14 @@ export function MediaVariableEditor({
             onKeyDown={(event) => {
               if (event.key === "Enter") {
                 event.preventDefault();
-                importUrl();
+                void importUrl();
               }
             }}
           >
             <Input placeholder={copy.urlPlaceholder} />
           </TextField>
         </div>
-        <Button size="S" isDisabled={isBusy} onPress={importUrl}>
+        <Button size="S" isDisabled={isBusy} onPress={() => void importUrl()}>
           Use URL
         </Button>
       </Flex>

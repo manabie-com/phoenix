@@ -27,6 +27,7 @@ import {
 import { JSONEditor } from "@phoenix/components/code";
 import { isJSONObjectString } from "@phoenix/utils/jsonUtils";
 
+import { DatasetExampleMediaField } from "../dataset/media/DatasetExampleMediaField";
 import type { EditExampleDialogMutation } from "./__generated__/EditExampleDialogMutation.graphql";
 
 type ExamplePatch = {
@@ -178,6 +179,10 @@ export function EditExampleDialog(props: EditExampleDialogProps) {
                           value={value}
                           onChange={onChange}
                           onBlur={onBlur}
+                        />
+                        <DatasetExampleMediaField
+                          value={value}
+                          onChange={onChange}
                         />
                       </Card>
                     )}

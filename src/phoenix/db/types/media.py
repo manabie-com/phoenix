@@ -25,7 +25,7 @@ would need the fetch anyway.
 import base64
 import binascii
 import re
-from typing import NamedTuple, Union
+from typing import NamedTuple, Optional, Union
 
 from pydantic import model_validator
 from typing_extensions import Self, TypeAlias
@@ -66,6 +66,42 @@ agree on PDF, which is why it comes first.
 
 SUPPORTED_MEDIA_TYPES = SUPPORTED_IMAGE_MEDIA_TYPES | SUPPORTED_FILE_MEDIA_TYPES
 """Every media type Phoenix will store."""
+
+
+def detect_media_type(content: bytes) -> Optional[str]:
+    """
+    Identify media from its leading bytes.
+
+    Whatever a caller claims the type is, it is advisory; the type stored and
+    later served is derived from the content itself. That is what makes it safe
+    to accept media from an upload, a third-party URL, or a span recorded by
+    somebody else's instrumentation.
+
+    Args:
+        content: The media bytes.
+
+    Returns:
+        The detected media type, or ``None`` if the bytes match none of the
+        supported formats.
+    """
+    if content.startswith(b"\x89PNG\r\n\x1a\n"):
+        return "image/png"
+    if content.startswith(b"\xff\xd8\xff"):
+        return "image/jpeg"
+    if content.startswith((b"GIF87a", b"GIF89a")):
+        return "image/gif"
+    if content[:4] == b"RIFF" and content[8:12] == b"WEBP":
+        return "image/webp"
+    if content.startswith(b"%PDF-"):
+        return "application/pdf"
+    if content[4:8] == b"ftyp":
+        brand = content[8:12]
+        if brand in (b"heic", b"heix", b"hevc", b"hevx"):
+            return "image/heic"
+        if brand in (b"mif1", b"msf1"):
+            return "image/heif"
+    return None
+
 
 _SHA256_PATTERN = re.compile(r"\A[0-9a-f]{64}\Z")
 _DATA_URL_PATTERN = re.compile(

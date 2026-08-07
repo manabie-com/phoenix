@@ -222,10 +222,11 @@ class TestUpstreamBehaviourPreserved:
 
 
 class TestErrors:
-    def test_missing_image_variable_names_the_variable(self) -> None:
-        prompt = make_prompt([{"role": "user", "content": IMAGE_VAR}])
-        with pytest.raises(MediaResolutionError, match="'image'"):
-            to_openai(prompt, variables={"subject": "a cat"})
+    """A supplied image that cannot be used must raise.
+
+    A variable left unsupplied is a different situation and is not an error; see
+    `test_optional_media_variables.py`.
+    """
 
     def test_phoenix_url_without_client_explains_the_fix(self) -> None:
         prompt = make_prompt(
@@ -306,11 +307,6 @@ class TestFileParts:
         prompt = make_prompt([{"role": "user", "content": self.FILE_VAR}])
         with pytest.raises(MediaResolutionError, match="unsupported file media type"):
             to_openai(prompt, variables={"contract_pdf": PNG_BYTES})
-
-    def test_missing_file_variable_says_file_not_image(self) -> None:
-        prompt = make_prompt([{"role": "user", "content": self.FILE_VAR}])
-        with pytest.raises(MediaResolutionError, match="expects a file for variable"):
-            to_openai(prompt, variables={})
 
 
 class TestUnsupportedReporting:

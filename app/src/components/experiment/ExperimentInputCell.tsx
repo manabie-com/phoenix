@@ -14,6 +14,7 @@ import {
   TooltipTrigger,
 } from "@phoenix/components/core/tooltip";
 import { DynamicContent } from "@phoenix/components/DynamicContent";
+import { ExampleMediaPreview } from "@phoenix/components/media/ExampleMediaPreview";
 import { CellTop } from "@phoenix/components/table";
 
 const contentCSS = css`
@@ -78,6 +79,7 @@ export function ExperimentInputCell({
       </CellTop>
       <ExpandableContent height={height}>
         <div css={contentCSS}>
+          <ExampleMediaPreview input={value} padding="size-0" compact />
           <DynamicContent value={value} />
         </div>
       </ExpandableContent>

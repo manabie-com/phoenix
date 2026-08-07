@@ -23,6 +23,7 @@ from phoenix.db.helpers import get_eval_trace_ids_for_datasets, get_project_name
 from phoenix.server.api.auth import IsLocked, IsNotReadOnly, IsNotViewer
 from phoenix.server.api.context import Context
 from phoenix.server.api.exceptions import BadRequest, Conflict, NotFound
+from phoenix.server.api.helpers.dataset_example_media import externalize_inline_media
 from phoenix.server.api.helpers.dataset_helpers import (
     get_dataset_example_input,
     get_dataset_example_output,
@@ -212,8 +213,12 @@ class DatasetMutationMixin:
                     {
                         DatasetExampleRevision.dataset_example_id.key: dataset_example_rowid,
                         DatasetExampleRevision.dataset_version_id.key: dataset_version.id,
-                        DatasetExampleRevision.input.key: get_dataset_example_input(span),
-                        DatasetExampleRevision.output.key: get_dataset_example_output(span),
+                        DatasetExampleRevision.input.key: await externalize_inline_media(
+                            session, get_dataset_example_input(span)
+                        ),
+                        DatasetExampleRevision.output.key: await externalize_inline_media(
+                            session, get_dataset_example_output(span)
+                        ),
                         DatasetExampleRevision.metadata_.key: {
                             **(span.attributes.get(SpanAttributes.METADATA) or dict()),
                             **{
@@ -380,8 +385,12 @@ class DatasetMutationMixin:
                     {
                         DatasetExampleRevision.dataset_example_id.key: dataset_example_rowid,
                         DatasetExampleRevision.dataset_version_id.key: dataset_version_rowid,
-                        DatasetExampleRevision.input.key: example.input,
-                        DatasetExampleRevision.output.key: example.output,
+                        DatasetExampleRevision.input.key: await externalize_inline_media(
+                            session, example.input
+                        ),
+                        DatasetExampleRevision.output.key: await externalize_inline_media(
+                            session, example.output
+                        ),
                         DatasetExampleRevision.metadata_.key: {
                             **cast(dict[str, Any], example.metadata or {}),
                             "annotations": span_annotation,

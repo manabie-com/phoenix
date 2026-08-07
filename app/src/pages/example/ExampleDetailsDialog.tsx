@@ -29,6 +29,7 @@ import { SelectChevronUpDownIcon } from "@phoenix/components/core/icon";
 import { Skeleton } from "@phoenix/components/core/loading";
 import { DatasetSplits } from "@phoenix/components/datasetSplit/DatasetSplits";
 import { DynamicContent } from "@phoenix/components/DynamicContent";
+import { ExampleMediaPreview } from "@phoenix/components/media/ExampleMediaPreview";
 import { resizeHandleCSS } from "@phoenix/components/resize";
 import { SELECTED_SPAN_NODE_ID_PARAM } from "@phoenix/constants/searchParams";
 import { useNotifySuccess } from "@phoenix/contexts";
@@ -312,6 +313,7 @@ function ExampleDetailsDialogContent({
                         />
                       </View>
                     )}
+                    <ExampleMediaPreview input={input} />
                   </Card>
                   <Card
                     title="Output"

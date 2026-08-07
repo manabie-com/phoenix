@@ -47,6 +47,7 @@ import { Truncate } from "@phoenix/components/core/utility/Truncate";
 import { useExperimentColors } from "@phoenix/components/experiment";
 import { ExperimentOutputContent } from "@phoenix/components/experiment/ExperimentOutputContent";
 import { ExperimentRunMetadataEmpty } from "@phoenix/components/experiment/ExperimentRunMetadataEmpty";
+import { ExampleMediaPreview } from "@phoenix/components/media/ExampleMediaPreview";
 import {
   compactResizeHandleCSS,
   resizeHandleCSS,
@@ -308,6 +309,7 @@ export function ExperimentCompareDetails({
                 }
               }}
             >
+              <ExampleMediaPreview input={input} />
               <FullSizeJSONBlock value={JSON.stringify(input, null, 2)} />
             </Card>
           </View>

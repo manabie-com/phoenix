@@ -1,5 +1,6 @@
 """Resolution of prompt media references into the bytes a model provider needs."""
 
+import hashlib
 from datetime import datetime, timezone
 from typing import Iterable, NamedTuple, Optional
 
@@ -7,12 +8,31 @@ from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from phoenix.db import models
-from phoenix.db.types.media import HostedMediaRef, InlineMedia, parse_media_url
+from phoenix.db.helpers import SupportedSQLDialect
+from phoenix.db.insertion.helpers import OnConflict, insert_on_conflict
+from phoenix.db.types.media import (
+    SUPPORTED_MEDIA_TYPES,
+    HostedMediaRef,
+    InlineMedia,
+    detect_media_type,
+    hosted_media_url,
+    parse_media_url,
+)
 from phoenix.server.api.helpers.media_storage import media_store
 
 
 class MediaResolutionError(Exception):
     """Raised when prompt media cannot be resolved into bytes."""
+
+
+class StoredMedia(NamedTuple):
+    """Media that has been written to the store and recorded in ``media_files``."""
+
+    sha256: str
+    media_type: str
+    size_bytes: int
+    url: str
+    """The ``phoenix://media/<sha256>`` reference that names it."""
 
 
 class ResolvedMedia(NamedTuple):
@@ -164,4 +184,69 @@ async def mark_media_referenced(session: AsyncSession, urls: Iterable[str]) -> N
         # image a hundred times should cost one write, not a hundred.
         .where(models.MediaFile.sha256.in_(digests), models.MediaFile.referenced_at.is_(None))
         .values(referenced_at=datetime.now(timezone.utc))
+    )
+
+
+async def store_media(
+    session: AsyncSession,
+    content: bytes,
+    *,
+    file_name: Optional[str] = None,
+) -> Optional[StoredMedia]:
+    """
+    Store media bytes and return what names them.
+
+    The counterpart to :func:`resolve_media`, for the paths that receive bytes
+    rather than a reference — media arriving inline on a span, which has to become
+    a reference before it is copied into a dataset example that would otherwise
+    carry hundreds of kilobytes of base64 per row.
+
+    Content-addressed, so the same image stored twice costs one row and one object.
+    The type is derived from the bytes, never from what the source claimed, exactly
+    as an upload is.
+
+    Bytes first, metadata second — the other order would leave a row promising
+    media that is not there yet, which every reader reports as missing. This order
+    can leave stored bytes with no row, which the sweeper reclaims.
+
+    Args:
+        session: Session used to record the media row. The caller's transaction
+            commits it.
+        content: The media bytes.
+        file_name: The name to remember the media by, when one is known.
+
+    Returns:
+        The stored media's digest, type, size and reference, or ``None`` when the
+        bytes are empty or are not a media type Phoenix stores. ``None`` is
+        deliberately not an exception: this runs while copying somebody else's span
+        into a dataset, where one unrecognisable blob must not fail the whole
+        operation. The REST upload endpoint turns the same ``None`` into a 415.
+    """
+    if not content:
+        return None
+    media_type = detect_media_type(content)
+    if media_type is None or media_type not in SUPPORTED_MEDIA_TYPES:
+        return None
+    sha256 = hashlib.sha256(content).hexdigest()
+    await media_store().put(sha256, content, media_type=media_type)
+    await session.execute(
+        insert_on_conflict(
+            dict(
+                sha256=sha256,
+                media_type=media_type,
+                size_bytes=len(content),
+                file_name=file_name,
+            ),
+            dialect=SupportedSQLDialect(session.bind.dialect.name),
+            table=models.MediaFile,
+            unique_by=("sha256",),
+            on_conflict=OnConflict.DO_NOTHING,
+            constraint_name="pk_media_files",
+        )
+    )
+    return StoredMedia(
+        sha256=sha256,
+        media_type=media_type,
+        size_bytes=len(content),
+        url=hosted_media_url(sha256),
     )

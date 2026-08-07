@@ -239,12 +239,11 @@ class TestBase64Media:
 
 
 class TestMediaResolutionErrors:
-    """Unresolvable media must raise, never silently drop."""
+    """Media that was supplied and cannot be used must raise, never silently drop.
 
-    def test_missing_image_variable_names_the_variable(self) -> None:
-        prompt = make_prompt([{"role": "user", "content": TEXT_AND_IMAGE_VARIABLE}])
-        with pytest.raises(MediaResolutionError, match="'image'"):
-            to_genai(prompt, variables={"subject": "a cat"})
+    A variable left unsupplied is a different situation and is not an error; see
+    `test_optional_media_variables.py`.
+    """
 
     def test_nonexistent_path_raises(self) -> None:
         prompt = make_prompt([{"role": "user", "content": TEXT_AND_IMAGE_VARIABLE}])
@@ -436,8 +435,3 @@ class TestFileParts:
         prompt = make_prompt([{"role": "user", "content": self.FILE_VAR}])
         with pytest.raises(MediaResolutionError, match="unsupported file media type"):
             to_genai(prompt, variables={"contract_pdf": PNG_BYTES})
-
-    def test_missing_file_variable_says_file_not_image(self) -> None:
-        prompt = make_prompt([{"role": "user", "content": self.FILE_VAR}])
-        with pytest.raises(MediaResolutionError, match="expects a file for variable"):
-            to_genai(prompt, variables={})

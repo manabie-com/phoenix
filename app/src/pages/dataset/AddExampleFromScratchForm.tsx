@@ -33,6 +33,7 @@ import {
 } from "@phoenix/utils/jsonUtils";
 
 import type { AddExampleFromScratchFormMutation } from "./__generated__/AddExampleFromScratchFormMutation.graphql";
+import { DatasetExampleMediaField } from "./media/DatasetExampleMediaField";
 
 type DatasetExamplePatch = {
   input: string;
@@ -199,6 +200,10 @@ export function AddExampleFromScratchForm(
                       value={value}
                       onChange={onChange}
                       onBlur={onBlur}
+                    />
+                    <DatasetExampleMediaField
+                      value={value}
+                      onChange={onChange}
                     />
                   </Card>
                 )}
