@@ -14,6 +14,7 @@ import {
   View,
 } from "@phoenix/components";
 import { Attachments } from "@phoenix/components/ai/attachment";
+import { ExampleMediaAttachment } from "@phoenix/components/media/ExampleMediaAttachment";
 import { useMediaStore } from "@phoenix/hooks/useMediaStore";
 import {
   findExampleMedia,
@@ -21,8 +22,6 @@ import {
   removeExampleMedia,
   setExampleMedia,
 } from "@phoenix/utils/datasetExampleMediaUtils";
-
-import { ExampleMediaAttachment } from "@phoenix/components/media/ExampleMediaAttachment";
 
 /**
  * Attaches images and documents to a dataset example.

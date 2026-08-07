@@ -90,7 +90,7 @@ class TestAbsentVariableIsDropped:
         )
         content = message["content"]
         assert not isinstance(content, str)
-        assert content[0]["text"] == "Grade 4:"
+        assert content[0]["text"] == "Grade 4:"  # type: ignore[typeddict-item]
 
     def test_a_file_slot_behaves_the_same_way(self) -> None:
         (message,) = run(

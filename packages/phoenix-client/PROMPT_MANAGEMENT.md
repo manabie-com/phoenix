@@ -273,7 +273,7 @@ that have none — which is most of them, in a dataset built from real data:
 
 ```python
 rows = [
-    {"answer": "text-only row"},                     # key absent
+    {"answer": "text-only row"},  # key absent
     {"answer": "blank cell", "question_image": None},  # what an empty column becomes
     {"answer": "has an attachment", "question_image": Path("marking.png")},
 ]
