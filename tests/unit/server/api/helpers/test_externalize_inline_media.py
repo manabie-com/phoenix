@@ -14,11 +14,13 @@ A new test file on purpose (see .claude/rules/fork-ownership.md).
 """
 
 import base64
+import json
 from typing import Any
 
 import pytest
 
 from phoenix.db import models
+from phoenix.db.insertion.dataset import insert_dataset_example_revision
 from phoenix.server.api.helpers.dataset_example_media import (
     MEDIA_URL_KEY,
     externalize_inline_media,
@@ -167,6 +169,85 @@ class TestBytesReprPayloads:
             assert await externalize_inline_media(session, part) == part
 
 
+class TestTheWalkDoesNotStopAtAnInlinePart:
+    """An inline part is a mapping like any other; its siblings still get walked.
+
+    Returning early once `inline_data` was recognised left a `data:` URL sitting
+    beside it untouched, and — worse — skipped the whole mapping whenever the
+    payload could not be decoded, so one corrupt blob preserved every other inline
+    image in the same part.
+    """
+
+    async def test_a_sibling_data_url_is_externalized_too(self, db: DbSessionFactory) -> None:
+        part = {**gemini_part(), "thumbnail": PNG_DATA_URL}
+        async with db() as session:
+            result = await externalize_inline_media(session, part)
+        assert result["inline_data"][MEDIA_URL_KEY].startswith(HOSTED_PREFIX)
+        assert result["thumbnail"].startswith(HOSTED_PREFIX)
+
+    async def test_a_corrupt_payload_does_not_shield_its_siblings(
+        self, db: DbSessionFactory
+    ) -> None:
+        part = {**gemini_part("!!!! not base64 !!!!"), "thumbnail": PNG_DATA_URL}
+        async with db() as session:
+            result = await externalize_inline_media(session, part)
+        # The undecodable payload is left exactly as it was...
+        assert result["inline_data"]["data"] == "!!!! not base64 !!!!"
+        # ...but that must not stop the sibling from being stored.
+        assert result["thumbnail"].startswith(HOSTED_PREFIX)
+
+    async def test_nested_parts_inside_an_inline_part_are_reached(
+        self, db: DbSessionFactory
+    ) -> None:
+        part = {**gemini_part(), "alternatives": [{"image_url": {"url": PNG_DATA_URL}}]}
+        async with db() as session:
+            result = await externalize_inline_media(session, part)
+        assert result["alternatives"][0]["image_url"]["url"].startswith(HOSTED_PREFIX)
+
+
+class TestDepthGuard:
+    """The walk is bounded, exactly as its TypeScript twin is.
+
+    An example's input is arbitrary JSON from somebody else's instrumentation, and
+    every level costs a stack frame. Unbounded, a pathological span becomes a
+    `RecursionError` inside the dataset insert — a 500 on the one path whose whole
+    premise is that failing to shrink a row beats failing to save the span.
+    """
+
+    async def test_a_pathological_structure_does_not_raise(self, db: DbSessionFactory) -> None:
+        # 700 is chosen against the measured window, not picked for roundness:
+        # `json.loads` parses to roughly 800 levels, while the unguarded walk
+        # raises `RecursionError` from about 600. Anything in between is a span
+        # Phoenix ingests happily and then crashes on. 400 sat below that window
+        # and passed either way, which is no test at all.
+        deep: Any = PNG_DATA_URL
+        for _ in range(700):
+            deep = {"next": deep}
+        async with db() as session:
+            result = await externalize_inline_media(session, {"root": deep})
+        assert result is not None  # returned rather than blowing the stack
+
+    async def test_media_within_the_cap_is_still_externalized(self, db: DbSessionFactory) -> None:
+        nested: Any = {"image": PNG_DATA_URL}
+        for _ in range(8):
+            nested = {"next": nested}
+        async with db() as session:
+            result = await externalize_inline_media(session, nested)
+        found = json.dumps(result)
+        assert HOSTED_PREFIX in found and "data:image" not in found
+
+    async def test_media_past_the_cap_is_left_alone_rather_than_crashing(
+        self, db: DbSessionFactory
+    ) -> None:
+        nested: Any = {"image": PNG_DATA_URL}
+        for _ in range(30):
+            nested = {"next": nested}
+        async with db() as session:
+            result = await externalize_inline_media(session, nested)
+        # Not shrunk, but the row still saves — the trade this module always makes.
+        assert "data:image" in json.dumps(result)
+
+
 class TestTheImageIsNotLost:
     """Shrinking the row must never mean dropping the picture."""
 
@@ -238,3 +319,80 @@ class TestNothingElseIsTouched:
         zipped = "data:application/zip;base64," + base64.b64encode(b"PK\x03\x04junk").decode()
         async with db() as session:
             assert await externalize_inline_media(session, zipped) == zipped
+
+
+class TestTheInsertPathActuallyUsesIt:
+    """The delegation is wired, not merely available.
+
+    Every other test here calls `externalize_inline_media` directly, which proves
+    the helper works and nothing about whether anything calls it. The helper is
+    wired into four write paths by eight separate `await`s; a sync that drops one
+    of them would leave a row carrying hundreds of kilobytes of base64 again, with
+    the whole suite still green. This goes through the insert instead.
+    """
+
+    async def _example(self, session: Any) -> tuple[int, int]:
+        """A dataset, a version and an example to hang a revision off."""
+        dataset = models.Dataset(name="wiring-check", metadata_={})
+        session.add(dataset)
+        await session.flush()
+        version = models.DatasetVersion(dataset_id=dataset.id, metadata_={})
+        session.add(version)
+        example = models.DatasetExample(dataset_id=dataset.id)
+        session.add(example)
+        await session.flush()
+        return version.id, example.id
+
+    async def test_insert_dataset_example_revision_externalizes(self, db: DbSessionFactory) -> None:
+        async with db() as session:
+            version_id, example_id = await self._example(session)
+            revision_id = await insert_dataset_example_revision(
+                session=session,
+                dataset_version_id=version_id,
+                dataset_example_id=example_id,
+                input={"question": "what is this?", "question_image": PNG_DATA_URL},
+                output={},
+                metadata={},
+            )
+        async with db() as session:
+            revision = await session.get(models.DatasetExampleRevision, revision_id)
+        assert revision is not None
+        stored = revision.input["question_image"]
+        assert stored.startswith(HOSTED_PREFIX), "the insert did not externalize"
+        assert "data:image" not in json.dumps(revision.input)
+        # The rest of the row is untouched.
+        assert revision.input["question"] == "what is this?"
+
+    async def test_output_is_externalized_too(self, db: DbSessionFactory) -> None:
+        async with db() as session:
+            version_id, example_id = await self._example(session)
+            revision_id = await insert_dataset_example_revision(
+                session=session,
+                dataset_version_id=version_id,
+                dataset_example_id=example_id,
+                input={},
+                output={"rendered": PNG_DATA_URL},
+                metadata={},
+            )
+        async with db() as session:
+            revision = await session.get(models.DatasetExampleRevision, revision_id)
+        assert revision is not None
+        assert revision.output["rendered"].startswith(HOSTED_PREFIX)
+
+    async def test_a_text_only_example_is_stored_verbatim(self, db: DbSessionFactory) -> None:
+        # The delegation must not reshape rows that have nothing to do with media.
+        row = {"question": "no media here", "note": "data is not a URI"}
+        async with db() as session:
+            version_id, example_id = await self._example(session)
+            revision_id = await insert_dataset_example_revision(
+                session=session,
+                dataset_version_id=version_id,
+                dataset_example_id=example_id,
+                input=row,
+                output={},
+                metadata={},
+            )
+        async with db() as session:
+            revision = await session.get(models.DatasetExampleRevision, revision_id)
+        assert revision is not None
+        assert revision.input == row

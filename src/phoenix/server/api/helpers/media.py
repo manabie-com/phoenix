@@ -25,6 +25,16 @@ class MediaResolutionError(Exception):
     """Raised when prompt media cannot be resolved into bytes."""
 
 
+class StoredMedia(NamedTuple):
+    """Media that has been written to the store and recorded in ``media_files``."""
+
+    sha256: str
+    media_type: str
+    size_bytes: int
+    url: str
+    """The ``phoenix://media/<sha256>`` reference that names it."""
+
+
 class ResolvedMedia(NamedTuple):
     """Media bytes ready to hand to a model provider."""
 
@@ -182,9 +192,9 @@ async def store_media(
     content: bytes,
     *,
     file_name: Optional[str] = None,
-) -> Optional[str]:
+) -> Optional[StoredMedia]:
     """
-    Store media bytes and return the reference that names them.
+    Store media bytes and return what names them.
 
     The counterpart to :func:`resolve_media`, for the paths that receive bytes
     rather than a reference — media arriving inline on a span, which has to become
@@ -206,10 +216,11 @@ async def store_media(
         file_name: The name to remember the media by, when one is known.
 
     Returns:
-        A ``phoenix://media/<sha256>`` reference, or ``None`` when the bytes are
-        empty or are not a media type Phoenix stores. ``None`` is deliberately not
-        an exception: this runs while copying somebody else's span into a dataset,
-        and one unrecognisable blob must not fail the whole operation.
+        The stored media's digest, type, size and reference, or ``None`` when the
+        bytes are empty or are not a media type Phoenix stores. ``None`` is
+        deliberately not an exception: this runs while copying somebody else's span
+        into a dataset, where one unrecognisable blob must not fail the whole
+        operation. The REST upload endpoint turns the same ``None`` into a 415.
     """
     if not content:
         return None
@@ -233,4 +244,9 @@ async def store_media(
             constraint_name="pk_media_files",
         )
     )
-    return hosted_media_url(sha256)
+    return StoredMedia(
+        sha256=sha256,
+        media_type=media_type,
+        size_bytes=len(content),
+        url=hosted_media_url(sha256),
+    )

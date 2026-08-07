@@ -270,41 +270,90 @@ async def externalize_inline_media(session: AsyncSession, value: Any) -> Any:
 
     Returns:
         The same structure with inline media replaced. Anything that cannot be
-        stored — an unrecognised type, a corrupt payload — is returned untouched,
-        because failing to shrink a row is a far better outcome than failing to
-        save somebody's span.
+        stored — an unrecognised type, a corrupt payload, a structure nested past
+        :data:`_MAX_WALK_DEPTH` — is returned untouched, because failing to shrink
+        a row is a far better outcome than failing to save somebody's span.
     """
-    if isinstance(value, str):
-        if not value.startswith("data:"):
-            return value
-        try:
-            reference = parse_media_url(value)
-        except ValueError:
-            return value
-        if not isinstance(reference, InlineMedia):
-            return value
-        try:
-            content = reference.decode()
-        except ValueError:
-            return value
-        return await store_media(session, content) or value
+    return await _externalize(session, value, 0)
 
-    if _is_inline_media_part(value):
-        inline = value[_INLINE_DATA_KEY]
-        decoded = _decode_inline_payload(inline[_INLINE_PAYLOAD_KEY])
-        if decoded is None:
-            return value
-        if (stored := await store_media(session, decoded)) is None:
-            return value
-        replacement = {k: v for k, v in inline.items() if k != _INLINE_PAYLOAD_KEY}
-        replacement[MEDIA_URL_KEY] = stored
-        return {**value, _INLINE_DATA_KEY: replacement}
+
+#: How deep the walk will go. An example's input is arbitrary JSON from somebody
+#: else's instrumentation, and every level costs a stack frame, so an unbounded
+#: walk turns a pathological span into a ``RecursionError`` *inside the dataset
+#: insert* — a 500 on the one path whose whole premise is that failing to shrink a
+#: row beats failing to save the span. Mirrors the identical cap on the TypeScript
+#: side (``MAX_SCAN_DEPTH`` in ``datasetExampleMediaUtils.ts``); far deeper than
+#: any real payload, which bottoms out around five.
+_MAX_WALK_DEPTH = 12
+
+
+async def _externalize(session: AsyncSession, value: Any, depth: int) -> Any:
+    """Recursive worker for :func:`externalize_inline_media`, carrying the depth."""
+    if depth > _MAX_WALK_DEPTH:
+        return value
+
+    if isinstance(value, str):
+        return await _externalized_data_url(session, value)
 
     if isinstance(value, Mapping):
-        return {k: await externalize_inline_media(session, v) for k, v in value.items()}
+        # An inline part is still a mapping like any other, so its siblings get
+        # walked too. Returning early here would leave a `data:` URL sitting
+        # beside the payload untouched, and would skip the rest of the mapping
+        # entirely whenever the payload could not be decoded.
+        replacement = (
+            await _externalized_inline_payload(session, value[_INLINE_DATA_KEY])
+            if _is_inline_media_part(value)
+            else None
+        )
+        return {
+            key: replacement
+            if key == _INLINE_DATA_KEY and replacement is not None
+            else await _externalize(session, item, depth + 1)
+            for key, item in value.items()
+        }
+
     if isinstance(value, Sequence) and not isinstance(value, (str, bytes)):
-        return [await externalize_inline_media(session, item) for item in value]
+        return [await _externalize(session, item, depth + 1) for item in value]
     return value
+
+
+async def _externalized_data_url(session: AsyncSession, value: str) -> str:
+    """A ``data:`` URL replaced by a stored reference, or the string unchanged."""
+    if not value.startswith("data:"):
+        return value
+    try:
+        reference = parse_media_url(value)
+    except ValueError:
+        return value
+    if not isinstance(reference, InlineMedia):
+        return value
+    try:
+        content = reference.decode()
+    except ValueError:
+        return value
+    stored = await store_media(session, content)
+    return stored.url if stored is not None else value
+
+
+async def _externalized_inline_payload(
+    session: AsyncSession,
+    inline: Mapping[str, Any],
+) -> Optional[dict[str, Any]]:
+    """
+    A provider's inline-bytes block with its payload stored and referenced.
+
+    Returns ``None`` when the payload cannot be decoded or stored, which leaves the
+    caller to walk the block like any other mapping rather than rewriting it.
+    """
+    decoded = _decode_inline_payload(inline[_INLINE_PAYLOAD_KEY])
+    if decoded is None:
+        return None
+    stored = await store_media(session, decoded)
+    if stored is None:
+        return None
+    replacement = {k: v for k, v in inline.items() if k != _INLINE_PAYLOAD_KEY}
+    replacement[MEDIA_URL_KEY] = stored.url
+    return replacement
 
 
 def with_example_media(message: Any, original: Mapping[str, Any]) -> Any:

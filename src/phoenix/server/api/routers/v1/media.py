@@ -1,6 +1,5 @@
 """REST endpoints for the content-addressed media referenced by prompt templates."""
 
-import hashlib
 import logging
 import socket
 from ipaddress import ip_address
@@ -21,13 +20,10 @@ from starlette.status import (
 
 from phoenix.config import get_env_max_media_bytes
 from phoenix.db import models
-from phoenix.db.helpers import SupportedSQLDialect
-from phoenix.db.insertion.helpers import OnConflict, insert_on_conflict
 from phoenix.db.types.media import (
     SUPPORTED_MEDIA_TYPES,
-    detect_media_type,
-    hosted_media_url,
 )
+from phoenix.server.api.helpers.media import store_media
 from phoenix.server.api.helpers.media_storage import media_store
 from phoenix.server.api.routers.v1.models import V1RoutesBaseModel
 from phoenix.server.api.routers.v1.utils import (
@@ -275,8 +271,14 @@ async def _store_media(
     """
     Validate media and store it, returning the reference prompts use.
 
-    Shared by every way media arrives so that the type is always determined from
-    the bytes, never from what the caller claimed.
+    The HTTP skin over :func:`store_media`, which does the actual work and is
+    shared with the span-to-dataset path. Storing lives there rather than here so
+    that the two callers cannot drift: a fix applied to one copy and not the other
+    is the failure mode the fork-ownership rules call out by name.
+
+    The only thing this adds is the distinction an API response needs and a walk
+    over somebody else's span does not — "you sent nothing" versus "you sent
+    something I cannot store" — which `store_media` collapses into one ``None``.
 
     Args:
         request: The FastAPI request object, for the database.
@@ -295,44 +297,21 @@ async def _store_media(
             status_code=HTTP_415_UNSUPPORTED_MEDIA_TYPE,
             detail=f"{source} is empty.",
         )
-    media_type = detect_media_type(content)
-    if media_type is None or media_type not in SUPPORTED_MEDIA_TYPES:
+    async with request.app.state.db() as session:
+        stored = await store_media(session, content, file_name=file_name)
+    if stored is None:
         raise HTTPException(
             status_code=HTTP_415_UNSUPPORTED_MEDIA_TYPE,
             detail=(
                 f"Unsupported media. Expected one of: {', '.join(sorted(SUPPORTED_MEDIA_TYPES))}."
             ),
         )
-
-    sha256 = hashlib.sha256(content).hexdigest()
-    # Bytes first, metadata second. The other order would leave a row promising media
-    # that is not there yet, which every reader would report as missing. This order can
-    # leave stored bytes with no row, which the sweeper reclaims as unreferenced.
-    await media_store().put(sha256, content, media_type=media_type)
-    async with request.app.state.db() as session:
-        dialect = SupportedSQLDialect(session.bind.dialect.name)
-        await session.execute(
-            insert_on_conflict(
-                dict(
-                    sha256=sha256,
-                    media_type=media_type,
-                    size_bytes=len(content),
-                    file_name=file_name,
-                ),
-                dialect=dialect,
-                table=models.MediaFile,
-                unique_by=("sha256",),
-                on_conflict=OnConflict.DO_NOTHING,
-                constraint_name="pk_media_files",
-            )
-        )
-
     return UploadMediaResponseBody(
         data=MediaFileData(
-            sha256=sha256,
-            media_type=media_type,
-            size_bytes=len(content),
-            url=hosted_media_url(sha256),
+            sha256=stored.sha256,
+            media_type=stored.media_type,
+            size_bytes=stored.size_bytes,
+            url=stored.url,
         )
     )
 
