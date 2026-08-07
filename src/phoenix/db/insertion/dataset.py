@@ -14,6 +14,7 @@ from typing_extensions import TypeAlias, assert_never
 from phoenix.db import models
 from phoenix.db.helpers import SupportedSQLDialect, get_dataset_example_revisions
 from phoenix.db.insertion.helpers import DataManipulationEvent, OnConflict, insert_on_conflict
+from phoenix.server.api.helpers.dataset_example_media import externalize_inline_media
 from phoenix.server.api.types.node import from_global_id_with_expected_type
 
 # Batch size for bulk inserts - tuned for good performance across SQLite and PostgreSQL
@@ -180,8 +181,8 @@ async def insert_dataset_example_revision(
         .values(
             dataset_version_id=dataset_version_id,
             dataset_example_id=dataset_example_id,
-            input=input,
-            output=output,
+            input=await externalize_inline_media(session, input),
+            output=await externalize_inline_media(session, output),
             metadata_=metadata,
             revision_kind=revision_kind.value,
             content_hash=content_hash,
@@ -287,8 +288,8 @@ async def bulk_insert_dataset_example_revisions(
             {
                 "dataset_version_id": dataset_version_id,
                 "dataset_example_id": example_id,
-                "input": example.content.input,
-                "output": example.content.output,
+                "input": await externalize_inline_media(session, example.content.input),
+                "output": await externalize_inline_media(session, example.content.output),
                 "metadata_": example.content.metadata,
                 "content_hash": example.content_hash,
                 "revision_kind": revision_kind.value,

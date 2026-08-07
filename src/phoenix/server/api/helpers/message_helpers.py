@@ -12,9 +12,11 @@ from typing import Any, Iterable, Mapping, Optional, Sequence, TypedDict, Union
 from typing_extensions import Required, assert_never
 
 from phoenix.db.types.prompts import PromptChatTemplate, PromptTemplateFormat
+from phoenix.server.api.helpers.dataset_example_media import with_example_media
 from phoenix.server.api.helpers.message_media import (
     ContentBlock,
     TextContentBlock,
+    content_was_emptied,
     format_message_content,
     media_content_block,
 )
@@ -202,7 +204,7 @@ def extract_and_convert_example_messages(
     for i, msg in enumerate(messages_raw):
         if not isinstance(msg, dict):
             raise ValueError(f"Message at index {i} is not a dict (got {type(msg).__name__})")
-        messages.append(convert_openai_message_to_internal(msg))
+        messages.append(with_example_media(convert_openai_message_to_internal(msg), msg))
 
     return messages
 
@@ -327,10 +329,11 @@ def formatted_messages(
 
     Text is formatted, and a media block naming a variable takes its reference from
     that variable — the same substitution, applied to a different kind of content.
-    A media block already holding a stored reference is left alone.
+    A media block already holding a stored reference is left alone. A media slot this
+    run did not fill is dropped, and a message left with nothing at all goes with it.
 
     Raises:
-        BadRequest: A media variable has no value among the template variables.
+        BadRequest: A media variable was given a value that is not a reference.
     """
     messages_list = list(messages)
     if not messages_list:
@@ -343,6 +346,8 @@ def formatted_messages(
             template_formatter=template_formatter,
             template_variables=template_variables,
         )
+        if content_was_emptied(msg.get("content"), formatted_content):
+            continue
         result.append(
             create_playground_message(
                 msg["role"],

@@ -23,7 +23,11 @@ from phoenix.config import get_env_max_media_bytes
 from phoenix.db import models
 from phoenix.db.helpers import SupportedSQLDialect
 from phoenix.db.insertion.helpers import OnConflict, insert_on_conflict
-from phoenix.db.types.media import SUPPORTED_MEDIA_TYPES, hosted_media_url
+from phoenix.db.types.media import (
+    SUPPORTED_MEDIA_TYPES,
+    detect_media_type,
+    hosted_media_url,
+)
 from phoenix.server.api.helpers.media_storage import media_store
 from phoenix.server.api.routers.v1.models import V1RoutesBaseModel
 from phoenix.server.api.routers.v1.utils import (
@@ -51,39 +55,6 @@ _IMMUTABLE_MEDIA_HEADERS = {
     "X-Content-Type-Options": "nosniff",
     "Content-Security-Policy": "default-src 'none'; sandbox",
 }
-
-
-def _detect_media_type(content: bytes) -> Optional[str]:
-    """
-    Identify media from its leading bytes.
-
-    The media type reported by the uploading client is advisory; the type stored
-    and later served is derived from the content itself.
-
-    Args:
-        content: The uploaded bytes.
-
-    Returns:
-        The detected media type, or ``None`` if the bytes match none of the
-        supported image formats.
-    """
-    if content.startswith(b"\x89PNG\r\n\x1a\n"):
-        return "image/png"
-    if content.startswith(b"\xff\xd8\xff"):
-        return "image/jpeg"
-    if content.startswith((b"GIF87a", b"GIF89a")):
-        return "image/gif"
-    if content[:4] == b"RIFF" and content[8:12] == b"WEBP":
-        return "image/webp"
-    if content.startswith(b"%PDF-"):
-        return "application/pdf"
-    if content[4:8] == b"ftyp":
-        brand = content[8:12]
-        if brand in (b"heic", b"heix", b"hevc", b"hevx"):
-            return "image/heic"
-        if brand in (b"mif1", b"msf1"):
-            return "image/heif"
-    return None
 
 
 class MediaFileData(V1RoutesBaseModel):
@@ -324,7 +295,7 @@ async def _store_media(
             status_code=HTTP_415_UNSUPPORTED_MEDIA_TYPE,
             detail=f"{source} is empty.",
         )
-    media_type = _detect_media_type(content)
+    media_type = detect_media_type(content)
     if media_type is None or media_type not in SUPPORTED_MEDIA_TYPES:
         raise HTTPException(
             status_code=HTTP_415_UNSUPPORTED_MEDIA_TYPE,

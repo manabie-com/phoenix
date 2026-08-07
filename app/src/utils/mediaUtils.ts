@@ -18,6 +18,33 @@ export function isHostedMediaUrl(url: string): boolean {
 }
 
 /**
+ * Whether a URL carries its media inline as a `data:` URI.
+ *
+ * Phoenix's own playground stores media and records a reference, but a span from
+ * an instrumented app records whatever that app passed its provider — which is
+ * very often base64 inline, because that is what the SDKs take. Media saved out of
+ * such a span is inline too.
+ *
+ * Narrowed to the media types that can actually be shown, so an arbitrary `data:`
+ * blob of some unrelated type is not mistaken for a picture.
+ */
+export function isInlineMediaUrl(url: string): boolean {
+  return /^data:(image\/|application\/pdf)/i.test(url);
+}
+
+/**
+ * Whether a value is media the browser can render, however it is carried.
+ *
+ * The distinction between stored and inline matters when *resolving* a reference;
+ * it does not matter at all when deciding whether something is a picture worth
+ * showing. Views that only asked `isHostedMediaUrl` silently showed nothing for
+ * inline media, which is the common shape outside the playground.
+ */
+export function isRenderableMediaUrl(url: string): boolean {
+  return isHostedMediaUrl(url) || isInlineMediaUrl(url);
+}
+
+/**
  * Resolves a prompt media reference into a URL the browser can load.
  *
  * Media stored in Phoenix is referenced as `phoenix://media/<sha256>` so that

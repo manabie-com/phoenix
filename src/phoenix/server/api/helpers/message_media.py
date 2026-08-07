@@ -11,7 +11,7 @@ A message's content is either a plain string or an ordered list of blocks. Media
 forces the list: a string cannot say where an image sits relative to the text.
 """
 
-from typing import TYPE_CHECKING, Any, Iterable, Literal, Mapping, Union
+from typing import TYPE_CHECKING, Any, Iterable, Literal, Mapping, Optional, Union
 
 from sqlalchemy.ext.asyncio import AsyncSession
 from typing_extensions import Required, TypeAlias, TypedDict
@@ -241,9 +241,25 @@ def _media_variable_value(
     template_variables: Mapping[str, Any],
     *,
     kind: str,
-) -> str:
+) -> Optional[str]:
     """
     The media reference supplied for a media variable.
+
+    A media slot is optional. One prompt has to serve both the runs that fill it and
+    the runs that do not — a dataset holding attachment-bearing and text-only rows is
+    the ordinary case — so a slot left empty yields ``None`` and the block is dropped.
+    The alternative is maintaining two near-identical prompts, or attaching a
+    placeholder image to the text-only rows, which changes what the model sees.
+
+    An empty slot arrives in three shapes and all three mean the same thing: the key
+    is missing, the value is ``None``, or the value is blank. The last two are what a
+    dataset column with empty cells becomes, so recognising only the missing key would
+    reject exactly the rows this admits.
+
+    What stays an error is a value that *was* supplied and cannot be used — a number,
+    an object, anything that is not a reference. Media is still never silently
+    dropped; "you gave me nothing" has simply stopped being read as "you gave me
+    something broken".
 
     Args:
         variable: The media variable's name.
@@ -251,16 +267,16 @@ def _media_variable_value(
         kind: Which kind of media the part expects, so the error names it correctly.
 
     Returns:
-        The reference to resolve, e.g. ``phoenix://media/<sha256>``.
+        The reference to resolve, e.g. ``phoenix://media/<sha256>``, or ``None`` when
+        this run supplied nothing for the slot.
 
     Raises:
-        BadRequest: No value was supplied, or the value is not a reference string.
+        BadRequest: A value was supplied but is not a reference string.
     """
-    noun = _media_noun(kind)
-    if variable not in template_variables:
-        raise BadRequest(f"No {noun} was supplied for '{variable}'.")
-    value = template_variables[variable]
-    if not isinstance(value, str) or not value.strip():
+    value = template_variables.get(variable)
+    if value is None or (isinstance(value, str) and not value.strip()):
+        return None
+    if not isinstance(value, str):
         raise BadRequest(
             f"The value supplied for '{variable}' is not {_a_media_noun(kind)} reference. "
             f"Upload one for it and try again."
@@ -303,6 +319,10 @@ def format_message_content(
     variable — the same substitution, applied to a different kind of content. A media
     block already holding a stored reference is left alone.
 
+    A media block whose variable this run did not supply is dropped, leaving the rest
+    of the message intact. See :func:`_media_variable_value` for why an empty slot is
+    a normal outcome rather than an error.
+
     Args:
         content: The message's content, string or blocks.
         template_formatter: The formatter for this template format.
@@ -312,7 +332,7 @@ def format_message_content(
         The content, in whichever shape it arrived.
 
     Raises:
-        BadRequest: A media variable has no value among the template variables.
+        BadRequest: A media variable was given a value that is not a reference.
     """
     if isinstance(content, str) or content is None:
         return template_formatter.format(content or "", **template_variables)
@@ -326,14 +346,48 @@ def format_message_content(
                 )
             )
         elif (variable := block.get("variable")) is not None:
+            url = _media_variable_value(variable, template_variables, kind=block["kind"])
+            if url is None:
+                continue
             blocks.append(
                 MediaContentBlock(
                     type="media",
                     kind=block["kind"],
                     variable=variable,
-                    url=_media_variable_value(variable, template_variables, kind=block["kind"]),
+                    url=url,
                 )
             )
         else:
             blocks.append(block)
     return blocks
+
+
+def content_was_emptied(
+    original: Union[str, list["ContentBlock"], None],
+    formatted: Union[str, list["ContentBlock"]],
+) -> bool:
+    """
+    Whether substitution removed every block a message had.
+
+    Only an unsupplied media block is ever dropped, so this is exactly the message that
+    existed solely to carry media this run did not supply — a template whose user turn
+    is nothing but ``{{question_image}}``.
+
+    Such a message must not reach a provider. A user turn with no content at all is
+    rejected outright, so passing it on would turn a row that should simply run without
+    an attachment into a failed one, which is the outcome optional media exists to
+    avoid.
+
+    Args:
+        original: The message's content before substitution.
+        formatted: The same content afterwards.
+
+    Returns:
+        True when the message had blocks and now has none.
+    """
+    return (
+        isinstance(original, list)
+        and bool(original)
+        and isinstance(formatted, list)
+        and not formatted
+    )

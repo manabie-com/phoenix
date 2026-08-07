@@ -495,20 +495,24 @@ class TestMediaVariables:
         assert block["url"] == _PNG_URL
         assert block["variable"] == "question_image"
 
-    def test_formatting_reports_a_missing_image(self) -> None:
-        with pytest.raises(BadRequest, match="No image was supplied for 'question_image'"):
-            formatted_messages(
-                messages=prompt_chat_template_to_playground_messages(_variable_template()),
-                template_format=PromptTemplateFormat.MUSTACHE,
-                template_variables={"aspect": "colour"},
-            )
+    def test_formatting_drops_an_unsupplied_image(self) -> None:
+        # A media slot is optional; see test_optional_media_variables.py for the
+        # full contract. The text around it still formats.
+        messages = formatted_messages(
+            messages=prompt_chat_template_to_playground_messages(_variable_template()),
+            template_format=PromptTemplateFormat.MUSTACHE,
+            template_variables={"aspect": "colour"},
+        )
+        assert message_text(messages[0]) == "describe colour"
+        assert message_media(messages[0]) == []
 
-    def test_formatting_reports_a_blank_image_value(self) -> None:
+    def test_formatting_reports_an_unusable_image_value(self) -> None:
+        # Supplied but not a reference — still an error, as before.
         with pytest.raises(BadRequest, match="is not an image reference"):
             formatted_messages(
                 messages=prompt_chat_template_to_playground_messages(_variable_template()),
                 template_format=PromptTemplateFormat.MUSTACHE,
-                template_variables={"aspect": "c", "question_image": "   "},
+                template_variables={"aspect": "c", "question_image": 123},
             )
 
     async def test_resolves_the_substituted_reference_to_bytes(
@@ -576,25 +580,17 @@ class TestDocumentVariablesAreDescribedAsDocuments:
     """
     A prompt carrying a PDF should not be told anything about images.
 
-    These messages are the ones a user sees when a run is missing an input, so the
-    noun has to follow the part rather than being hardcoded to the kind that shipped
-    first.
+    These messages are the ones a user sees when a run supplies something a media
+    slot cannot use, so the noun has to follow the part rather than being hardcoded
+    to the kind that shipped first.
     """
 
-    def test_a_missing_document_is_reported_as_a_document(self) -> None:
-        with pytest.raises(BadRequest, match="No document was supplied for 'statement'"):
-            formatted_messages(
-                messages=prompt_chat_template_to_playground_messages(_file_variable_template()),
-                template_format=PromptTemplateFormat.MUSTACHE,
-                template_variables={"aspect": "the risks"},
-            )
-
-    def test_a_blank_document_value_is_reported_as_a_document(self) -> None:
+    def test_an_unusable_document_value_is_reported_as_a_document(self) -> None:
         with pytest.raises(BadRequest, match="is not a document reference"):
             formatted_messages(
                 messages=prompt_chat_template_to_playground_messages(_file_variable_template()),
                 template_format=PromptTemplateFormat.MUSTACHE,
-                template_variables={"aspect": "the risks", "statement": "   "},
+                template_variables={"aspect": "the risks", "statement": 123},
             )
 
     async def test_an_unsubstituted_document_is_reported_as_a_document(
@@ -608,11 +604,11 @@ class TestDocumentVariablesAreDescribedAsDocuments:
 
     def test_an_image_is_still_reported_as_an_image(self) -> None:
         """The image wording must not regress while the file wording is added."""
-        with pytest.raises(BadRequest, match="No image was supplied for 'question_image'"):
+        with pytest.raises(BadRequest, match="is not an image reference"):
             formatted_messages(
                 messages=prompt_chat_template_to_playground_messages(_variable_template()),
                 template_format=PromptTemplateFormat.MUSTACHE,
-                template_variables={"aspect": "colour"},
+                template_variables={"aspect": "colour", "question_image": 123},
             )
 
 

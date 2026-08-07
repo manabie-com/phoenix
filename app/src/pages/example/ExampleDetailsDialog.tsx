@@ -38,6 +38,7 @@ import type { Mutable } from "@phoenix/typeUtils";
 import type { ExampleDetailsDialogQuery } from "./__generated__/ExampleDetailsDialogQuery.graphql";
 import { EditExampleButton } from "./EditExampleButton";
 import { ExampleExperimentRunsTable } from "./ExampleExperimentRunsTable";
+import { ExampleMediaPreview } from "@phoenix/components/media/ExampleMediaPreview";
 
 type ViewMode = "json" | "pretty";
 
@@ -312,6 +313,7 @@ function ExampleDetailsDialogContent({
                         />
                       </View>
                     )}
+                    <ExampleMediaPreview input={input} />
                   </Card>
                   <Card
                     title="Output"

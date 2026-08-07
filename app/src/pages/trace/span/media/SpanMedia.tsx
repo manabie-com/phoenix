@@ -1,5 +1,4 @@
-import { useEffect, useState } from "react";
-
+import { useIsRenderableImage } from "@phoenix/hooks/useIsRenderableImage";
 import { SpanImage } from "@phoenix/pages/trace/span/SpanImage";
 import { resolveMediaUrl } from "@phoenix/utils/mediaUtils";
 
@@ -26,29 +25,7 @@ import { MediaNotAnImage } from "./MediaNotAnImage";
  */
 export function SpanMedia({ url }: { url: string }) {
   const resolvedUrl = resolveMediaUrl(url);
-  const [isImage, setIsImage] = useState(true);
-
-  useEffect(() => {
-    // Optimistic: the image renders straight away and is replaced only if the probe
-    // fails, so a working image never flashes a placeholder first. The browser
-    // serves both requests from one cache entry.
-    let cancelled = false;
-    const probe = new Image();
-    probe.onload = () => {
-      if (!cancelled) {
-        setIsImage(true);
-      }
-    };
-    probe.onerror = () => {
-      if (!cancelled) {
-        setIsImage(false);
-      }
-    };
-    probe.src = resolvedUrl;
-    return () => {
-      cancelled = true;
-    };
-  }, [resolvedUrl]);
+  const isImage = useIsRenderableImage(resolvedUrl);
 
   if (!isImage) {
     return <MediaNotAnImage url={resolvedUrl} />;

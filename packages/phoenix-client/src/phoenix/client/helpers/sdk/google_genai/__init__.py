@@ -66,6 +66,7 @@ from phoenix.client.__generated__ import v1
 from phoenix.client.helpers.prompt_media import (
     SUPPORTED_FILE_MEDIA_TYPES,
     MediaResolutionError,
+    note_omitted_media,
     resolve_media_source,
 )
 from phoenix.client.utils.template_formatters import (
@@ -88,6 +89,10 @@ __all__ = ["GenaiPrompt", "to_genai", "MediaResolutionError"]
 _MODEL_ROLES = frozenset({"assistant", "model", "ai"})
 _SYSTEM_ROLES = frozenset({"system", "developer"})
 
+# Content parts whose source is a `MediaContent | MediaVariable`, keyed by the
+# part key that holds it — `part["image"]` and `part["file"]` respectively.
+_MEDIA_KINDS = frozenset({"image", "file"})
+
 
 @dataclass(frozen=True)
 class GenaiPrompt:
@@ -107,6 +112,7 @@ class GenaiPrompt:
     config: "genai_types.GenerateContentConfig"
     system_instruction: Optional[str] = None
     _unsupported: tuple[str, ...] = field(default=(), repr=False)
+    _omitted_media: tuple[str, ...] = field(default=(), repr=False)
 
     @property
     def unsupported_parts(self) -> tuple[str, ...]:
@@ -117,6 +123,17 @@ class GenaiPrompt:
         exists to avoid.
         """
         return self._unsupported
+
+    @property
+    def omitted_media(self) -> tuple[str, ...]:
+        """Media variables the template declares that this run did not supply.
+
+        Kept apart from `unsupported_parts`: an empty optional slot is a normal
+        outcome, not a conversion failure, and conflating the two would make a
+        deliberately text-only run look broken. Reading it is how a caller who
+        expected to pass an image catches a misspelled key.
+        """
+        return self._omitted_media
 
 
 def _genai_types() -> Any:
@@ -160,7 +177,7 @@ def _media_part(
     client: Optional[httpx.Client],
     *,
     kind: str,
-) -> Any:
+) -> Optional[Any]:
     """Inline an image or a document as a Gemini part.
 
     Gemini carries a document exactly as it carries an image — same `inline_data`
@@ -168,6 +185,8 @@ def _media_part(
     mirrors the server's own `playground_media/_google.py`.
 
     Gemini will not fetch an arbitrary HTTP URL, so every reference is inlined.
+
+    `None` means the part's variable was not supplied and the slot stays empty.
     """
     types = _genai_types()
     resolved = resolve_media_source(
@@ -179,6 +198,8 @@ def _media_part(
         # accepted type, so an early, named failure beats a provider 400.
         supported_media_types=SUPPORTED_FILE_MEDIA_TYPES if kind == "file" else None,
     )
+    if resolved is None:
+        return None
     return types.Part.from_bytes(data=resolved.data, mime_type=resolved.media_type)
 
 
@@ -227,7 +248,8 @@ def to_genai(
         variables: Values for the prompt's template variables. String values
             substitute into text; an image variable (`{{image}}` in the UI) takes
             raw bytes, base64 (str or bytes), a filesystem path, a `data:` URI,
-            an `http(s)` URL, or a `MediaContent` mapping.
+            an `http(s)` URL, or a `MediaContent` mapping. A media variable left
+            out is an empty slot, not an error — see `omitted_media`.
         client: The httpx client to fetch image URLs with. Required for images
             stored in Phoenix, whose URLs need the caller's auth — pass
             `Client()._client`.
@@ -235,11 +257,12 @@ def to_genai(
     Returns:
         A `GenaiPrompt` carrying `contents`, `config`, `system_instruction`, and
         `model`. Check `unsupported_parts` if you want to assert nothing was
-        skipped.
+        skipped, and `omitted_media` for slots this run left empty.
 
     Raises:
-        MediaResolutionError: An image reference could not be turned into bytes,
-            including when a required image variable was not supplied.
+        MediaResolutionError: An image reference was supplied but could not be
+            turned into bytes. A variable left unsupplied is not an error — its
+            part is skipped and its name reported in `omitted_media`.
         ImportError: `google-genai` is not installed.
     """
     types = _genai_types()
@@ -258,6 +281,7 @@ def to_genai(
     system_chunks: list[str] = []
     contents: list[Any] = []
     unsupported: list[str] = []
+    omitted: list[str] = []
 
     for message in messages:
         role = message["role"]
@@ -282,18 +306,15 @@ def to_genai(
             kind = part["type"]
             if kind == "text":
                 parts_out.append(_text_part(part, variables, formatter))
-            elif kind == "image":
-                parts_out.append(
-                    _media_part(
-                        cast(Mapping[str, Any], part["image"]), variables, client, kind="image"
-                    )
-                )
-            elif kind == "file":
-                parts_out.append(
-                    _media_part(
-                        cast(Mapping[str, Any], part["file"]), variables, client, kind="file"
-                    )
-                )
+            elif kind in _MEDIA_KINDS:
+                # Both kinds travel the same `inline_data` channel, so the only
+                # difference is which key holds the source.
+                source = cast(Mapping[str, Any], part[kind])
+                media = _media_part(source, variables, client, kind=kind)
+                if media is None:
+                    note_omitted_media(omitted, source)
+                else:
+                    parts_out.append(media)
             elif kind == "tool_call":
                 call = part["tool_call"]
                 parts_out.append(
@@ -328,4 +349,5 @@ def to_genai(
         config=_config(obj, system_instruction),
         system_instruction=system_instruction,
         _unsupported=tuple(unsupported),
+        _omitted_media=tuple(omitted),
     )

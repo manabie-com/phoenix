@@ -14,6 +14,7 @@ from openinference.semconv.trace import (
 from typing_extensions import NotRequired
 
 from phoenix.db.models import Span
+from phoenix.server.api.helpers.dataset_example_media import span_message_media_content
 from phoenix.trace.attributes import get_attribute_value
 
 
@@ -282,7 +283,7 @@ def _get_content_from_message_contents(message: Mapping[str, Any]) -> Optional[s
 def _get_message(message: Mapping[str, Any]) -> _Message:
     content = get_attribute_value(message, MESSAGE_CONTENT)
     if content is None:
-        content = _get_content_from_message_contents(message)
+        content = span_message_media_content(message) or _get_content_from_message_contents(message)
     name = get_attribute_value(message, MESSAGE_NAME)
     # Collect tool_calls from both legacy function_call and modern tool_calls attributes.
     tool_calls: list[_ToolCall] = []

@@ -28,7 +28,11 @@ __all__ = [
     "MediaResolutionError",
     "PHOENIX_MEDIA_SCHEME",
     "SUPPORTED_FILE_MEDIA_TYPES",
+    "MediaReference",
     "ResolvedSource",
+    "media_reference",
+    "media_value_is_absent",
+    "note_omitted_media",
     "resolve_media_source",
     "ResolvedMedia",
     "resolve_media",
@@ -131,11 +135,53 @@ def _looks_like_file(value: str) -> Optional[Path]:
         return None
 
 
+# Content types a media reference must never resolve to. A fetch that lands on a
+# web page means the URL was wrong, not that the page is an image.
+_NON_MEDIA_PREFIXES = (
+    "text/",
+    "application/json",
+    "application/xml",
+    "application/xhtml",
+)
+
+
+def _reject_non_media(url: str, data: bytes, header_type: Optional[str]) -> None:
+    """Raise when a fetch came back as something that is plainly not media.
+
+    A 200 is not proof the URL was right. Phoenix serves its single-page app for
+    any unmatched path, so a mistyped filesystem path — which reaches the fetch
+    branch as a Phoenix-relative URL as soon as a client is present — comes back
+    as HTML with a perfectly healthy status. Without this the model is handed that
+    page as an image and the call *succeeds*, which is the silent corruption this
+    module exists to prevent and the hardest kind of failure to trace back.
+
+    Deliberately narrow. Bytes carrying a media signature are accepted whatever
+    the server claims, since a misconfigured host serving a real PNG as
+    `text/plain` is a working image; only bytes that are unrecognisable *and*
+    declared as text, JSON, or XML are rejected.
+    """
+    if sniff_media_type(data) is not None:
+        return
+    declared = (header_type or "").split(";")[0].strip().lower()
+    if declared.startswith(_NON_MEDIA_PREFIXES):
+        raise MediaResolutionError(
+            f"fetching {url!r} returned {declared!r}, which is not media — the "
+            "reference is probably wrong. A path that does not exist locally is "
+            "fetched from Phoenix, where any unknown path serves the web app."
+        )
+
+
 def fetch_url(url: str, client: Optional[httpx.Client]) -> tuple[bytes, Optional[str]]:
-    """GET `url`, reusing the caller's client so Phoenix auth and base_url apply."""
+    """GET `url`, reusing the caller's client so Phoenix auth and base_url apply.
+
+    Raises:
+        MediaResolutionError: The response was not media. See `_reject_non_media`.
+    """
     response = client.get(url) if client is not None else httpx.get(url, follow_redirects=True)
     response.raise_for_status()
-    return response.content, response.headers.get("content-type")
+    header_type = response.headers.get("content-type")
+    _reject_non_media(url, response.content, header_type)
+    return response.content, header_type
 
 
 def resolve_media(
@@ -271,6 +317,77 @@ class ResolvedSource:
     filename: str
 
 
+def media_value_is_absent(value: Any) -> bool:
+    """Whether a media variable's value means "nothing was supplied".
+
+    A prompt declaring a media slot has to serve both the runs that fill it and
+    the runs that do not — one dataset holding attachment-bearing and text-only
+    rows is the ordinary case, not the exotic one. So absence is a supported
+    input, and stays distinct from a value that *was* supplied and turned out to
+    be unusable, which still fails loudly.
+
+    A row with no attachment arrives in one of three shapes and all three mean
+    the same thing: the key is missing, the value is `None`, or the value is
+    blank. The latter two are what a spreadsheet column with empty cells becomes
+    once it is JSON, so keying on the missing key alone would reject exactly the
+    rows this exists to admit.
+    """
+    if value is None:
+        return True
+    if isinstance(value, str):
+        return not value.strip()
+    if isinstance(value, (bytes, bytearray)):
+        return not value
+    if isinstance(value, memoryview):
+        # `memoryview` is generic, so `len()` on an unparameterized one is a
+        # partially-unknown call under pyright strict. `nbytes` is an int.
+        return value.nbytes == 0
+    return False
+
+
+@dataclass(frozen=True)
+class MediaReference:
+    """What a media part points at, before anything is fetched or decoded."""
+
+    value: Any
+    media_type: Optional[str]
+
+
+def media_reference(
+    source: Mapping[str, Any],
+    variables: Mapping[str, Any],
+) -> Optional[MediaReference]:
+    """The reference a content part carries, or `None` if its slot is empty.
+
+    `None` means the part names a variable this run did not supply — the caller's
+    signal to leave the media out rather than to fail.
+
+    Separate from `resolve_media_source` because the OpenAI image path needs the
+    reference rather than bytes: a public URL is handed to OpenAI to fetch, not
+    downloaded and re-encoded. Both paths have to agree on what counts as absent,
+    and one implementation is the only way to keep that true.
+    """
+    if "variable" in source:
+        value = variables.get(source["variable"])
+        if media_value_is_absent(value):
+            return None
+        return MediaReference(value=value, media_type=None)
+    return MediaReference(value=source.get("url"), media_type=source.get("media_type"))
+
+
+def note_omitted_media(omitted: list[str], source: Mapping[str, Any]) -> None:
+    """Record that a media slot was left empty, so the omission stays visible.
+
+    Skipping an unsupplied slot is the point, but it should never be *invisible*:
+    a caller who meant to pass an image and misspelled the key would otherwise
+    see a silently text-only prompt. Appended in template order and deduplicated,
+    since one variable may fill several parts.
+    """
+    name = source.get("variable")
+    if isinstance(name, str) and name not in omitted:
+        omitted.append(name)
+
+
 def resolve_media_source(
     source: Mapping[str, Any],
     variables: Mapping[str, Any],
@@ -278,7 +395,7 @@ def resolve_media_source(
     *,
     kind: str = "image",
     supported_media_types: Optional[frozenset[str]] = None,
-) -> ResolvedSource:
+) -> Optional[ResolvedSource]:
     """Resolve a content part's media field to bytes, media type, and filename.
 
     Shared by `ImageContentPart.image` and `FileContentPart.file`, which are the
@@ -296,23 +413,19 @@ def resolve_media_source(
             A variable carries no declared type, so this is the only point at
             which its value can be checked at all.
 
+    Returns:
+        The resolved media, or `None` when the part names a variable this run did
+        not supply — an optional slot, which the caller leaves out.
+
     Raises:
-        MediaResolutionError: Unresolvable, or an unsupported media type.
+        MediaResolutionError: Supplied but unresolvable, or an unsupported media
+            type. An empty slot is not a failure; a bad value still is.
     """
-    if "variable" in source:
-        name = source["variable"]
-        if name not in variables:
-            raise MediaResolutionError(
-                f"prompt expects {'a file' if kind == 'file' else 'an image'} for variable "
-                f"{name!r}; pass it as variables={{{name!r}: <bytes | base64 | path | url>}}"
-            )
-        reference: Any = variables[name]
-        data, media_type = resolve_media(reference, client=client)
-    else:
-        reference = source.get("url")
-        data, media_type = resolve_media(
-            reference, media_type=source.get("media_type"), client=client
-        )
+    if (reference := media_reference(source, variables)) is None:
+        return None
+    data, media_type = resolve_media(
+        reference.value, media_type=reference.media_type, client=client
+    )
 
     if supported_media_types is not None and media_type.lower() not in supported_media_types:
         raise MediaResolutionError(
@@ -321,7 +434,7 @@ def resolve_media_source(
         )
 
     return ResolvedSource(
-        data=data, media_type=media_type, filename=_file_name(reference, media_type)
+        data=data, media_type=media_type, filename=_file_name(reference.value, media_type)
     )
 
 

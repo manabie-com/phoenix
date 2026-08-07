@@ -243,17 +243,68 @@ recognizable signature fall back to `application/octet-stream`, which Gemini
 rejects for image input — for formats outside that list, pass a `MediaContent`
 mapping with an explicit `media_type`.
 
-**Failures are loud.** An unresolvable image raises `MediaResolutionError` naming
-the variable and what was expected. Images are never silently dropped.
+**Failures are loud.** An image that was supplied and cannot be resolved raises
+`MediaResolutionError` naming the variable and what was expected. Media that was
+supplied is never silently dropped.
 
 ```python
 from phoenix.client.helpers.sdk.google_genai import MediaResolutionError
 
 try:
-    p = to_genai(prompt, variables={})
+    p = to_genai(prompt, variables={"image": "/no/such/file.png"})
 except MediaResolutionError as e:
-    ...  # "prompt expects an image for variable 'image'; pass it as ..."
+    ...  # "no such file: /no/such/file.png"
 ```
+
+### Optional media slots
+
+A media variable is **optional**. Leaving it out skips that part and the run
+proceeds; supplying something unusable still raises. These are two different
+situations, and only the second is a failure:
+
+| what you passed | what happens |
+| --- | --- |
+| nothing — key absent, `None`, or `""` | the part is skipped, the run proceeds |
+| a value that cannot be resolved | `MediaResolutionError`, as above |
+
+This is what lets **one prompt serve a whole dataset**. A prompt can declare
+`question_image` so that attachments *can* be tested, and still run against rows
+that have none — which is most of them, in a dataset built from real data:
+
+```python
+rows = [
+    {"answer": "text-only row"},                     # key absent
+    {"answer": "blank cell", "question_image": None},  # what an empty column becomes
+    {"answer": "has an attachment", "question_image": Path("marking.png")},
+]
+for row in rows:
+    p = to_genai(prompt, variables=row)  # every row converts
+```
+
+Without this, the alternatives were maintaining two near-identical prompts, or
+attaching a placeholder image to the text-only rows — which changes what the model
+sees, so a reviewer would be judging a distorted input.
+
+A message that consisted *only* of an unfilled media slot is dropped along with
+it, since a turn with no content at all is rejected by every provider.
+
+**Skipping is never invisible.** Both converters report the variables they left
+empty, so a misspelled key is findable rather than silently producing a text-only
+prompt:
+
+```python
+p = to_genai(prompt, variables={"answer": "4"})
+p.omitted_media  # ("question_image",)
+```
+
+`omitted_media` is deliberately separate from `unsupported_parts`: an empty
+optional slot is a normal outcome, not a conversion failure.
+
+In the UI the same rule applies — the Playground and any experiment run over a
+dataset skip a media slot the run does not fill. Attach media to a dataset example
+from the example editor, which stores the file and writes its
+`phoenix://media/<sha256>` reference into the example's input under the variable
+name you give it.
 
 ### With Google ADK
 
