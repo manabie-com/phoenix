@@ -86,8 +86,12 @@ import {
 } from "./constants";
 import {
   mediaContentPartInputs,
+  spanMessageImages,
   withMediaVariableValues,
-} from "./playgroundMedia";
+  withoutInputMessagesError,
+  withoutOutputMessagesError,
+  withRawSpanInputMedia,
+} from "./fork";
 import {
   getVisibleInvocationParameterSpecs,
   getDefaultInvocationConfig,
@@ -251,6 +255,7 @@ function processAttributeMessagesToChatMessage({
         : typeof message.content === "string"
           ? message.content
           : undefined,
+      ...spanMessageImages(message.contents),
       toolCalls: processAttributeToolCalls({
         provider,
         toolCalls: message.tool_calls,
@@ -1117,7 +1122,8 @@ export function transformSpanAttributesToPlaygroundInstance(
   const { tools, parsingErrors: toolsParsingErrors } =
     getToolsFromAttributes(parsedAttributes);
 
-  const messages = rawMessages?.map((message) => {
+  const mediaMessages = withRawSpanInputMedia(rawMessages, parsedAttributes);
+  const messages = mediaMessages?.map((message) => {
     return {
       ...message,
       // If the message is a tool message, we need to normalize the content
@@ -1159,8 +1165,8 @@ export function transformSpanAttributesToPlaygroundInstance(
     playgroundInput:
       variables != null ? { variablesValueCache: variables } : undefined,
     parsingErrors: [
-      ...messageParsingErrors,
-      ...outputParsingErrors,
+      ...withoutInputMessagesError(messageParsingErrors, mediaMessages),
+      ...withoutOutputMessagesError(outputParsingErrors),
       ...modelConfigParsingErrors,
       ...toolsParsingErrors,
       ...invocationParametersParsingErrors,
