@@ -7,9 +7,12 @@ import {
 import { z } from "zod";
 
 import { jsonSchemaZodSchema } from "@phoenix/schemas";
+import {
+  mediaMessageShape,
+  spanMessageContentPartSchema,
+} from "@phoenix/schemas/fork";
 import type { JSONLiteral } from "@phoenix/schemas/jsonLiteralSchema";
 import { jsonLiteralSchema } from "@phoenix/schemas/jsonLiteralSchema";
-import { mediaMessageShape } from "@phoenix/schemas/mediaMessageShape";
 import { llmProviderToolCallSchema } from "@phoenix/schemas/toolCallSchemas";
 import {
   isObject,
@@ -49,7 +52,7 @@ const messageSchema = z.object({
       .union([z.string(), z.array(z.record(z.string(), z.unknown()))])
       .default(""),
     [MessageAttributePostfixes.contents]: z
-      .array(z.object({ message_content: z.record(z.string(), z.string()) }))
+      .array(spanMessageContentPartSchema)
       .optional(),
     [MessageAttributePostfixes.tool_calls]: z.array(toolCallSchema).optional(),
     [MessageAttributePostfixes.tool_call_id]: z.string().optional(),

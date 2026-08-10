@@ -1,8 +1,13 @@
-import type { MediaKind } from "@phoenix/schemas/mediaPartSchemas";
+import type { ImagePart, MediaKind } from "@phoenix/schemas/mediaPartSchemas";
+import type { SpanMessageContentPart } from "@phoenix/schemas/spanMessageContentSchema";
 import type {
   PlaygroundInput,
   PlaygroundInstance,
 } from "@phoenix/store/playground";
+import { canonicalDataUrl } from "@phoenix/utils/inlineMediaPayload";
+import { makeImagePart } from "@phoenix/utils/mediaParts";
+import { isHostedMediaUrl } from "@phoenix/utils/mediaUtils";
+import { isSupportedImageMediaType } from "@phoenix/utils/supportedMediaTypes";
 
 /**
  * Which media a playground template declares, and of what kind.
@@ -195,3 +200,67 @@ export const mediaContentPartInputs = (message: {
     fileVariable: { variable: file.variable },
   })),
 ];
+
+/**
+ * The media type a stored reference is replayed with.
+ *
+ * A span records an image as a reference and never a media type beside it, because
+ * the type is derived from the bytes rather than declared — which is also why
+ * `useIsRenderableImage` has to probe. A playground image part must still name one,
+ * so a stored reference is replayed with a supported placeholder.
+ *
+ * Sound because the declared type is advisory for a stored reference: the server
+ * replaces it with the type held against the stored bytes (see
+ * `resolve_media_in_messages`) before any provider sees the request, and an image
+ * tile renders no media type, so the placeholder is neither sent nor shown. Its only
+ * job is to satisfy `ImageContentPart`, which rejects a type outside the supported
+ * set. The one place it survives is a prompt saved out of a replayed span, where it
+ * is recorded — and still overridden on every run.
+ */
+export const REPLAYED_STORED_IMAGE_MEDIA_TYPE = "image/png";
+
+/**
+ * The images a recorded message carried, ready to spread onto its replayed message.
+ *
+ * Images only. OpenInference has no content-part convention for documents, so a span
+ * never records one, and there is nothing to read.
+ *
+ * An external `http(s)` image URL is skipped rather than carried. A chat completion
+ * takes only stored references and inline data URLs — an external one is refused with
+ * a BadRequest, on the grounds that resolving it would have Phoenix fetch a
+ * user-supplied URL server-side — so carrying it would trade a missing image for a
+ * run that cannot start.
+ *
+ * Returns an object to spread rather than an array so that a message with no usable
+ * image is left exactly as it was, with no empty `images` on it.
+ *
+ * @param contents The message's `contents` from the span attributes, if it had any.
+ */
+export const spanMessageImages = (
+  contents: SpanMessageContentPart[] | undefined
+): { images?: ImagePart[] } => {
+  const images: ImagePart[] = [];
+  for (const part of contents ?? []) {
+    const url = part.message_content.image?.image?.url;
+    if (!url) {
+      continue;
+    }
+    // Inline media is canonicalized rather than read: `canonicalDataUrl` rejects what
+    // the server rejects — a data URL with no `base64` parameter, or a payload that will
+    // not decode — and returns a URL whose header states the same type as the field.
+    // Gated on the shared list for the same reason the raw-payload reader is: a type the
+    // server refuses aborts the whole template conversion, so one unusable attachment
+    // must cost only itself, not the run.
+    const resolved = isHostedMediaUrl(url)
+      ? { url, mediaType: REPLAYED_STORED_IMAGE_MEDIA_TYPE }
+      : canonicalDataUrl(url);
+    if (resolved == null || !isSupportedImageMediaType(resolved.mediaType)) {
+      continue;
+    }
+    const image = makeImagePart(resolved.url, resolved.mediaType);
+    if (image) {
+      images.push(image);
+    }
+  }
+  return images.length > 0 ? { images } : {};
+};

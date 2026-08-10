@@ -4,6 +4,10 @@ import { authFetch } from "@phoenix/authFetch";
 import { BASE_URL } from "@phoenix/config";
 
 import { prependBasename } from "./routingUtils";
+import {
+  MEDIA_TYPE_EXTENSIONS,
+  normalizeMediaType,
+} from "./supportedMediaTypes";
 
 const PHOENIX_MEDIA_URL_PREFIX = "phoenix://media/";
 
@@ -59,17 +63,6 @@ export function resolveMediaUrl(url: string): string {
   return prependBasename(`/v1/media/${encodeURIComponent(sha256)}`);
 }
 
-/** Extensions for the media types Phoenix stores, for naming a stored file. */
-const MEDIA_TYPE_EXTENSIONS: Record<string, string> = {
-  "application/pdf": "pdf",
-  "image/jpeg": "jpg",
-  "image/png": "png",
-  "image/gif": "gif",
-  "image/webp": "webp",
-  "image/heic": "heic",
-  "image/heif": "heif",
-};
-
 /**
  * A display name for media a prompt references.
  *
@@ -80,7 +73,9 @@ const MEDIA_TYPE_EXTENSIONS: Record<string, string> = {
  */
 export function mediaDisplayName(url: string, mediaType: string): string {
   const extension =
-    MEDIA_TYPE_EXTENSIONS[mediaType] ?? mediaType.split("/").at(-1) ?? "bin";
+    MEDIA_TYPE_EXTENSIONS[normalizeMediaType(mediaType)] ??
+    mediaType.split("/").at(-1) ??
+    "bin";
   if (!url.startsWith(PHOENIX_MEDIA_URL_PREFIX)) {
     return `media.${extension}`;
   }
