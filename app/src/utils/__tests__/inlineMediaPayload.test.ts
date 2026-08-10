@@ -1,7 +1,7 @@
 import {
-  dataUrlMediaType,
+  canonicalDataUrl,
   decodePythonBytesRepr,
-  inlineMediaDataUrl,
+  inlineMedia,
 } from "../inlineMediaPayload";
 
 /** The first bytes of a real PNG, as the Google GenAI SDK's `bytes` would be dumped. */
@@ -39,40 +39,72 @@ describe("decodePythonBytesRepr", () => {
   });
 });
 
-describe("inlineMediaDataUrl", () => {
-  it("turns a bytes repr into a data URL", () => {
-    const url = inlineMediaDataUrl("image/png", PNG_BYTES_REPR);
-    expect(url).toBe(
-      `data:image/png;base64,${btoa(String.fromCharCode(...PNG_BYTES))}`
-    );
+describe("inlineMedia", () => {
+  it("turns a bytes repr into a canonical pair", () => {
+    expect(inlineMedia("image/png", PNG_BYTES_REPR)).toEqual({
+      url: `data:image/png;base64,${btoa(String.fromCharCode(...PNG_BYTES))}`,
+      mediaType: "image/png",
+    });
   });
 
   it("keeps a base64 payload, dropping the line breaks SDKs wrap it with", () => {
-    expect(inlineMediaDataUrl("image/png", "iVBO\nRw0K")).toBe(
+    expect(inlineMedia("image/png", "iVBO\nRw0K")).toEqual({
+      url: "data:image/png;base64,iVBORw0K",
+      mediaType: "image/png",
+    });
+  });
+
+  it("normalizes an aliased declared type into both halves", () => {
+    // The URL header and the media type must agree exactly or `MediaContent` rejects
+    // the pair, which aborts the whole run rather than the one attachment.
+    expect(inlineMedia("image/jpg", "iVBORw0K")).toEqual({
+      url: "data:image/jpeg;base64,iVBORw0K",
+      mediaType: "image/jpeg",
+    });
+  });
+
+  it("refuses a payload it cannot place", () => {
+    expect(inlineMedia("", "iVBORw0K")).toBeNull();
+    expect(inlineMedia("image/png", "not base64!!")).toBeNull();
+    expect(inlineMedia("image/png", "b''")).toBeNull();
+    // Length that cannot decode.
+    expect(inlineMedia("image/png", "QQQ")).toBeNull();
+  });
+});
+
+describe("canonicalDataUrl", () => {
+  it("rewrites the header so it states the normalized type", () => {
+    expect(canonicalDataUrl("data:image/JPG;base64,QQ==")).toEqual({
+      url: "data:image/jpeg;base64,QQ==",
+      mediaType: "image/jpeg",
+    });
+  });
+
+  it("passes a already-canonical URL through unchanged", () => {
+    expect(canonicalDataUrl("data:application/pdf;base64,JVBERi0=")).toEqual({
+      url: "data:application/pdf;base64,JVBERi0=",
+      mediaType: "application/pdf",
+    });
+  });
+
+  it("strips whitespace out of the payload", () => {
+    expect(canonicalDataUrl("data:image/png;base64,iVBO\nRw0K")?.url).toBe(
       "data:image/png;base64,iVBORw0K"
     );
   });
 
-  it("returns a data URL unchanged so its own declared type stays authoritative", () => {
-    const url = "data:application/pdf;base64,JVBERi0=";
-    expect(inlineMediaDataUrl("image/png", url)).toBe(url);
+  it("refuses a data URL the server would refuse", () => {
+    // parse_media_url requires the base64 parameter.
+    expect(canonicalDataUrl("data:image/png,AA")).toBeNull();
+    expect(canonicalDataUrl("data:image/png;charset=utf-8,AA")).toBeNull();
+    // InlineMedia.decode uses strict base64.
+    expect(canonicalDataUrl("data:image/png;base64,not!!")).toBeNull();
+    expect(canonicalDataUrl("data:image/png;base64,QQQ")).toBeNull();
+    expect(canonicalDataUrl("data:image/png;base64,")).toBeNull();
   });
 
-  it("refuses a payload it cannot place", () => {
-    expect(inlineMediaDataUrl("", "iVBORw0K")).toBeNull();
-    expect(inlineMediaDataUrl("image/png", "not base64!!")).toBeNull();
-    expect(inlineMediaDataUrl("image/png", "b''")).toBeNull();
-  });
-});
-
-describe("dataUrlMediaType", () => {
-  it("reads the type a data URL declares", () => {
-    expect(dataUrlMediaType("data:image/PNG;base64,AA==")).toBe("image/png");
-    expect(dataUrlMediaType("data:application/pdf,AA")).toBe("application/pdf");
-  });
-
-  it("returns null for anything else", () => {
-    expect(dataUrlMediaType("https://example.com/a.png")).toBeNull();
-    expect(dataUrlMediaType("phoenix://media/abc")).toBeNull();
+  it("returns null for anything that is not a data URL", () => {
+    expect(canonicalDataUrl("https://example.com/a.png")).toBeNull();
+    expect(canonicalDataUrl("phoenix://media/abc")).toBeNull();
   });
 });

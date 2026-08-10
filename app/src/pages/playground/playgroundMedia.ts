@@ -4,13 +4,10 @@ import type {
   PlaygroundInput,
   PlaygroundInstance,
 } from "@phoenix/store/playground";
-import { dataUrlMediaType } from "@phoenix/utils/inlineMediaPayload";
+import { canonicalDataUrl } from "@phoenix/utils/inlineMediaPayload";
 import { makeImagePart } from "@phoenix/utils/mediaParts";
 import { isHostedMediaUrl } from "@phoenix/utils/mediaUtils";
-import {
-  isSupportedImageMediaType,
-  normalizeMediaType,
-} from "@phoenix/utils/supportedMediaTypes";
+import { isSupportedImageMediaType } from "@phoenix/utils/supportedMediaTypes";
 
 /**
  * Which media a playground template declares, and of what kind.
@@ -248,16 +245,19 @@ export const spanMessageImages = (
     if (!url) {
       continue;
     }
-    const declared = isHostedMediaUrl(url)
-      ? REPLAYED_STORED_IMAGE_MEDIA_TYPE
-      : dataUrlMediaType(url);
-    // Gated on the shared list for the same reason the raw-payload reader is: a type
-    // the server refuses aborts the whole template conversion, so one unusable
-    // attachment must cost only itself.
-    if (declared == null || !isSupportedImageMediaType(declared)) {
+    // Inline media is canonicalized rather than read: `canonicalDataUrl` rejects what
+    // the server rejects — a data URL with no `base64` parameter, or a payload that will
+    // not decode — and returns a URL whose header states the same type as the field.
+    // Gated on the shared list for the same reason the raw-payload reader is: a type the
+    // server refuses aborts the whole template conversion, so one unusable attachment
+    // must cost only itself, not the run.
+    const resolved = isHostedMediaUrl(url)
+      ? { url, mediaType: REPLAYED_STORED_IMAGE_MEDIA_TYPE }
+      : canonicalDataUrl(url);
+    if (resolved == null || !isSupportedImageMediaType(resolved.mediaType)) {
       continue;
     }
-    const image = makeImagePart(url, normalizeMediaType(declared));
+    const image = makeImagePart(resolved.url, resolved.mediaType);
     if (image) {
       images.push(image);
     }

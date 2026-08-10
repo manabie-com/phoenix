@@ -33,10 +33,7 @@ import type { FilePart, ImagePart } from "@phoenix/schemas/mediaPartSchemas";
 import type { ChatMessage } from "@phoenix/store/playground";
 import { generateMessageId } from "@phoenix/store/playground";
 import { isStringKeyedObject } from "@phoenix/typeUtils";
-import {
-  dataUrlMediaType,
-  inlineMediaDataUrl,
-} from "@phoenix/utils/inlineMediaPayload";
+import { inlineMedia } from "@phoenix/utils/inlineMediaPayload";
 import { makeFilePart, makeImagePart } from "@phoenix/utils/mediaParts";
 import { isHostedMediaUrl } from "@phoenix/utils/mediaUtils";
 import {
@@ -82,33 +79,34 @@ const pick = (record: Record<string, unknown>, ...keys: string[]): unknown => {
  * resolves the reference. The cost is that a stored *document* recorded without a
  * declared type is replayed as an image; nothing on the client can tell them apart
  * without fetching the bytes.
+ *
+ * Inline media goes through `inlineMedia`, which returns the URL and its type as one
+ * canonical pair; nothing here recombines them, because a pair assembled from two
+ * sources is how the two came to disagree.
  */
 const mediaPart = (
   declaredMediaType: string | null,
   payload: string
 ): FoundMedia | null => {
-  const hosted = isHostedMediaUrl(payload);
-  const url = hosted
-    ? payload
-    : inlineMediaDataUrl(declaredMediaType ?? "", payload);
-  if (url == null) {
+  const resolved = isHostedMediaUrl(payload)
+    ? {
+        url: payload,
+        mediaType: normalizeMediaType(
+          declaredMediaType ?? REPLAYED_STORED_IMAGE_MEDIA_TYPE
+        ),
+      }
+    : inlineMedia(declaredMediaType ?? "", payload);
+  if (resolved == null) {
     return null;
   }
-  const mediaType =
-    dataUrlMediaType(url) ??
-    declaredMediaType ??
-    (hosted ? REPLAYED_STORED_IMAGE_MEDIA_TYPE : null);
-  if (mediaType == null) {
-    return null;
-  }
-  const normalized = normalizeMediaType(mediaType);
-  switch (mediaKindForType(normalized)) {
+  const { url, mediaType } = resolved;
+  switch (mediaKindForType(mediaType)) {
     case "image": {
-      const image = makeImagePart(url, normalized);
+      const image = makeImagePart(url, mediaType);
       return image ? { image } : null;
     }
     case "file": {
-      const file = makeFilePart(url, normalized);
+      const file = makeFilePart(url, mediaType);
       return file ? { file } : null;
     }
     default:
@@ -175,13 +173,16 @@ const readPartMedia = (part: Record<string, unknown>): FoundMedia | null => {
     return mediaPart(null, imageUrlValue);
   }
 
-  // OpenAI: `file: {file_data, filename}`, where `file_data` is a data URL.
-  const file = asRecord(pick(part, "file"));
-  if (file) {
-    const payload = asString(pick(file, "file_data", "fileData"));
-    if (payload) {
-      return mediaPart(null, payload);
-    }
+  // OpenAI documents, in both of the shapes the SDKs use: the completions API nests it
+  // as `file: {file_data, filename}`, while the responses API puts it on the part —
+  // `{type: "input_file", filename, file_data}`, which is what this fork's own responses
+  // builder emits (`playground_media/_openai.py`). Reading only the nested one dropped
+  // every PDF from a responses request, including the ones Phoenix itself recorded.
+  const fileData =
+    asString(pick(part, "file_data", "fileData")) ??
+    asString(pick(asRecord(pick(part, "file")) ?? {}, "file_data", "fileData"));
+  if (fileData) {
+    return mediaPart(null, fileData);
   }
 
   // Bedrock: `image: {format, source: {bytes}}` and `document: {format, source}`.
@@ -458,7 +459,7 @@ export function rawSpanInputMessages(
  * When there are no messages at all — upstream found no `llm.input_messages` — the
  * whole conversation is read from the raw request instead. Both recoveries live behind
  * one call so upstream's parser needs no branch of its own and keeps reporting exactly
- * what it could not read; {@link withoutInputMessagesError} decides whether that report
+ * what it could not read; {@link spanInputParsingErrors} decides whether that report
  * still deserves to be shown.
  *
  * @param messages The messages replay parsed from `llm.input_messages`, if any.

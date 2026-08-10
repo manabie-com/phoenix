@@ -160,14 +160,36 @@ describe("spanMessageImages media-type gate", () => {
     });
   });
 
-  it("normalizes image/jpg, which the server only accepts as image/jpeg", () => {
+  it("canonicalizes image/jpg in the URL as well as the field", () => {
+    // Normalizing only the field produced `{url: "data:image/jpg;…", mediaType:
+    // "image/jpeg"}`, which `MediaContent` rejects because the two disagree — so the
+    // alias that was supposed to rescue the attachment killed the run instead.
     expect(spanMessageImages([inlineImagePart("image/jpg")])).toEqual({
       images: [
         {
-          image: { url: "data:image/jpg;base64,QQ==", mediaType: "image/jpeg" },
+          image: {
+            url: "data:image/jpeg;base64,QQ==",
+            mediaType: "image/jpeg",
+          },
         },
       ],
     });
+  });
+
+  it("skips a data URL the server would refuse", () => {
+    for (const url of [
+      // No base64 parameter: parse_media_url refuses it.
+      "data:image/png,QQ==",
+      // Payload that will not decode.
+      "data:image/png;base64,not!!",
+      "data:image/png;base64,QQQ",
+    ]) {
+      expect(
+        spanMessageImages([
+          { message_content: { type: "image", image: { image: { url } } } },
+        ])
+      ).toEqual({});
+    }
   });
 
   it("skips a type the server refuses, rather than letting it abort the run", () => {

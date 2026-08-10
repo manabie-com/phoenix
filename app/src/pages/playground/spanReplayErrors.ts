@@ -29,19 +29,23 @@ import {
  * What a span recovered from its raw request is honest to say about itself.
  *
  * Not empty, deliberately. Suppressing the missing-messages error outright said the
- * replay was faithful, and it is not: the raw reader carries text and media but not
- * tool calls or tool results, and it leaves out turns that hold nothing else — so a
- * tool-using conversation comes back with turns missing. A clean banner over an
- * approximated template teaches exactly the dismissal habit that an over-reported one
- * does, which is the reason the output filter exists at all.
+ * replay was faithful, and it is not: the raw reader carries text and media but never
+ * tool calls, and a turn whose only content was a tool call has nothing left to show,
+ * so it is left out. A tool-using conversation therefore comes back a turn short. A
+ * clean banner over an approximated template teaches exactly the dismissal habit that
+ * an over-reported one does, which is the reason the output filter exists at all.
+ *
+ * Worded to match what is actually lost. A tool *result* recorded as its own message
+ * survives, with the id of the call it answers, so claiming results are dropped would
+ * be its own inaccuracy — the first draft of this notice said exactly that.
  *
  * So the error is replaced rather than removed: the reader is told the template is
  * complete enough to run and where it stops being faithful.
  */
 export const SPAN_INPUT_RECOVERED_FROM_RAW_REQUEST =
   "Span input messages were recovered from the raw request recorded on this span. " +
-  "Tool calls and tool results are not carried over, so this template may be " +
-  "incomplete.";
+  "Tool calls are not carried over, and a turn holding only a tool call is omitted, " +
+  "so this template may be incomplete.";
 
 /**
  * The input reports worth showing, given what the template ended up holding.

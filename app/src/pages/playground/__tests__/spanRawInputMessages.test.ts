@@ -483,7 +483,7 @@ describe("rawSpanInputMessages: shapes found during review", () => {
     expect(messages?.[0]).toMatchObject({ toolCallId: "toolu_1" });
   });
 
-  it("normalizes image/jpg on the raw path too", () => {
+  it("canonicalizes image/jpg in the URL as well as the field", () => {
     const messages = rawSpanInputMessages(
       attributes({
         messages: [
@@ -499,13 +499,74 @@ describe("rawSpanInputMessages: shapes found during review", () => {
         ],
       })
     );
+    // Both halves say image/jpeg; `MediaContent` requires them to be equal.
     expect(messages?.[0]).toMatchObject({
       images: [
         {
-          image: { url: "data:image/jpg;base64,QQ==", mediaType: "image/jpeg" },
+          image: {
+            url: "data:image/jpeg;base64,QQ==",
+            mediaType: "image/jpeg",
+          },
         },
       ],
     });
+  });
+
+  it("reads a responses-API document, whose file_data sits on the part", () => {
+    // The shape this fork's own responses builder emits, per
+    // playground_media/_openai.py — not nested under `file` as the completions API is.
+    const messages = rawSpanInputMessages(
+      attributes({
+        input: [
+          {
+            role: "user",
+            type: "message",
+            content: [
+              { type: "input_text", text: "read this" },
+              {
+                type: "input_file",
+                filename: "spec.pdf",
+                file_data: `data:application/pdf;base64,${PDF_BASE64}`,
+              },
+            ],
+          },
+        ],
+      })
+    );
+    expect(messages?.[0]).toMatchObject({
+      role: "user",
+      content: "read this",
+      files: [
+        {
+          file: {
+            url: `data:application/pdf;base64,${PDF_BASE64}`,
+            mediaType: "application/pdf",
+          },
+        },
+      ],
+    });
+  });
+
+  it("skips a data URL the server would refuse, keeping the text", () => {
+    const messages = rawSpanInputMessages(
+      attributes({
+        messages: [
+          {
+            role: "user",
+            content: [
+              { type: "text", text: "kept" },
+              { type: "image_url", image_url: { url: "data:image/png,QQ==" } },
+              {
+                type: "image_url",
+                image_url: { url: "data:image/png;base64,not!!" },
+              },
+            ],
+          },
+        ],
+      })
+    );
+    expect(messages?.[0]).toMatchObject({ content: "kept" });
+    expect(messages?.[0]).not.toHaveProperty("images");
   });
 
   it("skips a base64 payload whose length cannot decode", () => {

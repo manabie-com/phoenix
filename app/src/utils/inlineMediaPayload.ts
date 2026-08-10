@@ -18,7 +18,18 @@
  * Everything ends up as a `data:` URL because that is one of the two forms a chat
  * completion accepts (the other being a `phoenix://media/<sha256>` reference), and the
  * only one reachable without an upload.
+ *
+ * Every URL leaves here **canonical**: `data:<normalized-type>;base64,<payload>`, paired
+ * with the same type in the `mediaType` field. Both halves are returned together for a
+ * reason. An earlier revision passed an already-`data:` URL through untouched and
+ * normalized only the field, on the grounds that the URL's own declared type was
+ * authoritative — which produced `{url: "data:image/jpg;…", mediaType: "image/jpeg"}`.
+ * `MediaContent` requires those two to be equal (`db/types/media.py`), so the pair the
+ * alias was meant to rescue was rejected, and rejection is not local: it aborts the
+ * whole template conversion and with it the run. Canonicalizing the header and the
+ * field from one value makes disagreement unrepresentable.
  */
+import { normalizeMediaType } from "./supportedMediaTypes";
 
 /** Python string escapes that stand for a single byte, mapped to that byte. */
 const PYTHON_BYTE_ESCAPES: Record<string, number> = {
@@ -116,37 +127,71 @@ function isBase64(value: string): boolean {
   );
 }
 
+/** Inline media as the playground carries it: a canonical URL and its media type. */
+export type CanonicalInlineMedia = { url: string; mediaType: string };
+
+/** `data:<type>[;params],<payload>`, split into the three parts that matter. */
+const DATA_URL_PATTERN = /^data:([-\w.+]+\/[-\w.+]+)((?:;[^,]*)?),([\s\S]*)$/;
+
 /**
- * A `data:` URL for media a span recorded, or null when the payload is unusable.
+ * A recorded `data:` URL in the form the server accepts, or null when it is not usable.
  *
- * @param mediaType The media type declared alongside the payload.
- * @param payload The payload as recorded: a `data:` URL, base64, or a bytes repr.
- * @returns A `data:<mediaType>;base64,<payload>` URL. An input that is already a
- *   `data:` URL is returned unchanged, so its own declared type stays authoritative
- *   and keeps matching what the caller sends as the media type.
+ * Checks what the server checks, so that a URL it would reject never becomes a content
+ * part: the `base64` parameter has to be present (`parse_media_url` refuses a data URL
+ * without it) and the payload has to actually decode (`InlineMedia.decode` uses strict
+ * base64). Skipping one attachment here costs the attachment; letting it through costs
+ * the whole run.
+ *
+ * The returned URL is rebuilt rather than echoed, so its header always states the same
+ * normalized type as `mediaType`.
+ *
+ * @param url The `data:` URL as recorded.
  */
-export function inlineMediaDataUrl(
-  mediaType: string,
-  payload: string
-): string | null {
-  if (payload.startsWith("data:")) {
-    return payload;
+export function canonicalDataUrl(url: string): CanonicalInlineMedia | null {
+  const match = DATA_URL_PATTERN.exec(url);
+  if (match == null) {
+    return null;
   }
-  if (!mediaType) {
+  const [, declaredType, parameters, payload] = match;
+  if (!parameters.slice(1).split(";").includes("base64")) {
+    return null;
+  }
+  const compact = payload.replace(/\s/g, "");
+  if (!isBase64(compact)) {
+    return null;
+  }
+  const mediaType = normalizeMediaType(declaredType);
+  return { url: `data:${mediaType};base64,${compact}`, mediaType };
+}
+
+/**
+ * Media a span recorded, as a canonical inline pair, or null when it is unusable.
+ *
+ * @param declaredMediaType The media type recorded beside the payload, if any. Ignored
+ *   when the payload is a `data:` URL, which declares its own.
+ * @param payload The payload as recorded: a `data:` URL, base64, or a bytes repr.
+ */
+export function inlineMedia(
+  declaredMediaType: string,
+  payload: string
+): CanonicalInlineMedia | null {
+  if (payload.startsWith("data:")) {
+    return canonicalDataUrl(payload);
+  }
+  if (!declaredMediaType) {
     return null;
   }
   const bytes = decodePythonBytesRepr(payload);
+  let base64: string | null;
   if (bytes) {
-    return bytes.length > 0
-      ? `data:${mediaType};base64,${toBase64(bytes)}`
-      : null;
+    base64 = bytes.length > 0 ? toBase64(bytes) : null;
+  } else {
+    const compact = payload.replace(/\s/g, "");
+    base64 = isBase64(compact) ? compact : null;
   }
-  const compact = payload.replace(/\s/g, "");
-  return isBase64(compact) ? `data:${mediaType};base64,${compact}` : null;
-}
-
-/** The media type a `data:` URL declares, lowercased, or null when it declares none. */
-export function dataUrlMediaType(url: string): string | null {
-  const match = /^data:([-\w.+]+\/[-\w.+]+)[;,]/.exec(url);
-  return match ? match[1].toLowerCase() : null;
+  if (base64 == null) {
+    return null;
+  }
+  const mediaType = normalizeMediaType(declaredMediaType);
+  return { url: `data:${mediaType};base64,${base64}`, mediaType };
 }
