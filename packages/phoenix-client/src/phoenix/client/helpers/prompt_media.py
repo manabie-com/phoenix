@@ -21,6 +21,7 @@ import mimetypes
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Mapping, Optional, Union, cast
+from urllib.parse import urlsplit
 
 import httpx
 
@@ -336,6 +337,12 @@ def media_file_name(reference: Any, media_type: str) -> str:
     if isinstance(reference, Path):
         candidate = reference.name
     elif isinstance(reference, str) and not reference.startswith("data:"):
+        if reference.startswith(("http://", "https://")):
+            # A URL's query and fragment are not part of its file name, and a
+            # signed URL carries its credential there — which would otherwise
+            # become the name Phoenix stores and the name sent on to a provider
+            # alongside a document part.
+            reference = urlsplit(reference).path
         tail = reference.rstrip("/").rsplit("/", 1)[-1]
         # A digest is not a filename, and a bare base64 blob certainly is not.
         if "." in tail and len(tail) <= 128:

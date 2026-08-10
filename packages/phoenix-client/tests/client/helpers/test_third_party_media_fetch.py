@@ -21,7 +21,11 @@ from typing import Any
 import httpx
 import pytest
 
-from phoenix.client.helpers.prompt_media import addresses_phoenix, resolve_media
+from phoenix.client.helpers.prompt_media import (
+    addresses_phoenix,
+    media_file_name,
+    resolve_media,
+)
 
 PNG_BYTES = base64.b64decode(
     "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8DwHwAFAAH/q842iQAAAABJRU5ErkJggg=="
@@ -104,6 +108,54 @@ class TestThirdPartyUrls:
             resolve_media("https://example.com/cat.png", client=client)
 
         assert [url for url, _ in recorded_get] == ["https://example.com/cat.png"]
+
+
+class TestSignedUrlsDoNotLeakIntoTheFileName:
+    """A signed URL carries its credential in the query string, and the derived
+    name is persisted by Phoenix and sent to providers beside a document part."""
+
+    @pytest.mark.parametrize(
+        "reference,expected",
+        [
+            ("https://host/cat.png?token=SECRET", "cat.png"),
+            ("https://host/doc.pdf?X-Amz-Signature=deadbeef", "doc.pdf"),
+            ("https://host/cat.png#fragment", "cat.png"),
+            ("https://host/a/b/cat.png?x=1&y=2", "cat.png"),
+            ("https://host/cat.png", "cat.png"),  # unchanged when there is no query
+            ("/local/path/cat.png", "cat.png"),  # a plain path is not a URL
+        ],
+    )
+    def test_query_and_fragment_are_not_part_of_the_name(
+        self, reference: str, expected: str
+    ) -> None:
+        assert media_file_name(reference, "image/png") == expected
+
+    def test_the_upload_does_not_put_a_token_on_the_wire(
+        self, recorded_get: list[tuple[str, Any]]
+    ) -> None:
+        from phoenix.client.resources.media import Media
+
+        sent: list[bytes] = []
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            sent.append(request.content)
+            return httpx.Response(
+                200,
+                json={
+                    "data": {
+                        "sha256": SHA,
+                        "media_type": "image/png",
+                        "size_bytes": len(PNG_BYTES),
+                        "url": f"phoenix://media/{SHA}",
+                    }
+                },
+            )
+
+        with phoenix_client(handler) as client:
+            Media(client).upload("https://host/cat.png?token=SECRET-abc123")
+
+        assert b'filename="cat.png"' in sent[0]
+        assert b"SECRET-abc123" not in sent[0]
 
 
 class TestPhoenixUrlsStillUseTheClient:

@@ -235,4 +235,4 @@ class TestClientWiring:
         """`_client` is only annotated on the mixin, so the real attribute set by
         `Prompts.__init__` is what the methods use."""
         client = httpx.Client(base_url="http://test")
-        assert Prompts(client)._client is client
+        assert Prompts(client)._client is client  # pyright: ignore[reportPrivateUsage]

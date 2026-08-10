@@ -4,13 +4,16 @@ import base64
 import copy
 import json
 import pickle
+import threading
 from pathlib import Path
 from typing import Any
+from unittest import mock
 
 import httpx
 import pytest
 
 from phoenix.client.helpers.prompt_media import MediaResolutionError
+from phoenix.client.resources import media as media_module
 from phoenix.client.resources.media import AsyncMedia, FetchedMedia, Media
 
 PNG = b"\x89PNG\r\n\x1a\n" + b"\x00" * 16
@@ -254,6 +257,25 @@ class TestAsyncMedia:
         assert (content, media_type) == (PNG, "image/png")
 
     @pytest.mark.anyio
+    async def test_upload_resolves_off_the_event_loop(self) -> None:
+        """The shared resolver reads files and fetches URLs with blocking calls, so
+        running it on the loop would stall every other coroutine for the whole
+        download. It has to happen on a worker thread."""
+        resolved_on: list[bool] = []
+
+        def spy(*args: Any, **kwargs: Any) -> tuple[bytes, str]:
+            resolved_on.append(threading.current_thread() is threading.main_thread())
+            return PNG, "image/png"
+
+        async def handler(request: httpx.Request) -> httpx.Response:
+            return httpx.Response(200, json={"data": STORED})
+
+        with mock.patch.object(media_module, "resolve_media", spy):
+            await AsyncMedia(_async(handler)).upload(PNG, file_name="cat.png")
+
+        assert resolved_on == [False], "resolution ran on the event loop's thread"
+
+    @pytest.mark.anyio
     async def test_upload_cannot_resolve_phoenix_hosted_media(self) -> None:
         """The shared resolver takes a synchronous client, so the async upload
         cannot follow a `phoenix://` reference. Documented on the method; asserted
@@ -289,4 +311,6 @@ class TestClientWiring:
         from phoenix.client import Client
 
         client = Client(base_url="http://test", api_key="secret")
-        assert client.media._client is client._client
+        # Reaching for `_client` is the assertion: there is no public accessor for
+        # the configured httpx client, and identity is the only proof.
+        assert client.media._client is client._client  # pyright: ignore[reportPrivateUsage]

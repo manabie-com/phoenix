@@ -34,11 +34,14 @@ class TestMessages:
     def test_is_public(self) -> None:
         """The whole point: consumers had to reach `_template["messages"]`."""
         version = _version()
-        assert version.messages == tuple(version._template["messages"])
+        # The private read is the assertion: this pins the public accessor to the
+        # exact data consumers were reaching for.
+        assert version.messages == tuple(version._template["messages"])  # pyright: ignore[reportPrivateUsage]
         assert "messages" in dir(version)
 
     def test_round_trips_through_the_server_payload(self) -> None:
-        restored = PromptVersion._loads(_version()._dumps())
+        # No public constructor from raw API data, and none from a dumped version.
+        restored = PromptVersion._loads(_version()._dumps())  # pyright: ignore[reportPrivateUsage]
         assert list(restored.messages) == TEXT_AND_IMAGE
 
     def test_mutating_the_result_does_not_alter_the_version(self) -> None:

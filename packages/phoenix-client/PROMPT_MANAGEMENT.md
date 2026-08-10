@@ -678,9 +678,20 @@ is why it accepts exactly the values an image variable accepts.
 
 Tests:
 
-* `tests/client/helpers/test_openai_media_prompts.py` — 16 tests
-* `tests/client/helpers/test_google_genai_prompts.py` — 32 tests, skipped when
-  `google-genai` is absent
-* `tests/client/resources/media/test_media.py` — 23 tests
-* `tests/client/resources/prompts/test_prompt_management.py` — 17 tests
-* `tests/client/types/test_prompt_messages.py` — 9 tests
+Counts are deliberately not listed — they drifted twice before anyone noticed. Run
+`pytest <file> --collect-only -q` for the current number.
+
+* `tests/client/helpers/test_openai_media_prompts.py` — the OpenAI converter:
+  images inlined, public URLs passed through, documents given a filename
+* `tests/client/helpers/test_google_genai_prompts.py` — the same for Gemini, where
+  every reference is inlined. Skipped when `google-genai` is absent
+* `tests/client/helpers/test_fetched_media_is_media.py` — a fetch that lands on a
+  web page is refused rather than handed to a model as an image
+* `tests/client/helpers/test_third_party_media_fetch.py` — Phoenix credentials stay
+  on Phoenix's origin, and a signed URL's token never becomes the stored filename
+* `tests/client/resources/media/test_media.py` — `upload` / `import_from_url` /
+  `get`, sync and async
+* `tests/client/resources/prompts/test_prompt_management.py` — `list` / `versions` /
+  `delete`, pagination, and the empty-page answer for an unknown prompt
+* `tests/client/types/test_prompt_messages.py` — `messages` returns the unrendered
+  template, and does so where `to_genai` raises

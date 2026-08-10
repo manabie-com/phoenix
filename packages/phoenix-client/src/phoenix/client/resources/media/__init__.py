@@ -15,6 +15,7 @@ one they never tested against.
 
 from __future__ import annotations
 
+import asyncio
 from typing import Any, Optional, cast
 
 import httpx
@@ -325,15 +326,15 @@ class AsyncMedia:
             httpx.HTTPStatusError: If the server rejected the media.
 
         Note:
-            Resolution is synchronous — reading a file or fetching an ``http(s)``
-            URL blocks this coroutine. Pass bytes you already hold to keep the
-            event loop free, or use :meth:`import_from_url` so the fetch happens
-            on the server.
+            The shared resolver is synchronous, so it runs in a worker thread
+            rather than on the event loop — reading a file or fetching an
+            ``http(s)`` URL therefore does not stall other coroutines. Use
+            :meth:`import_from_url` to move the fetch off this process entirely.
 
-            For the same reason this cannot resolve a reference that needs the
-            Phoenix client itself — ``phoenix://media/<sha256>`` or a
-            Phoenix-relative path — because the shared resolver takes a
-            synchronous client. Both name media that is *already stored*, so
+            It still cannot resolve a reference that needs the Phoenix client
+            itself — ``phoenix://media/<sha256>`` or a Phoenix-relative path —
+            because that resolver takes a *synchronous* client, which this class
+            does not have. Both name media that is *already stored*, so
             re-uploading one is a round trip to the digest you started with;
             :meth:`get` reads it back instead. Passing one raises
             ``MediaResolutionError``.
@@ -346,7 +347,12 @@ class AsyncMedia:
             async_client = AsyncClient()
             stored = await async_client.media.upload(Path("cat.png"))
         """
-        content, detected_type = resolve_media(media, media_type=media_type)
+        # Off the event loop: the resolver reads files and fetches URLs with
+        # blocking calls, so awaiting it here would stall every other coroutine
+        # for the whole download.
+        content, detected_type = await asyncio.to_thread(
+            resolve_media, media, media_type=media_type
+        )
         name = file_name or media_file_name(media, detected_type)
         response = await self._client.post("v1/media", files=_upload_files(content, name))
         response.raise_for_status()
