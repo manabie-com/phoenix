@@ -38,8 +38,9 @@ from phoenix.client.helpers.sdk.openai.chat import (
 from phoenix.client.helpers.sdk.openai.chat import (
     to_chat_messages_and_kwargs as to_messages_openai,
 )
-from phoenix.client.types.prompt_messages import PromptMessagesMixin
 from phoenix.client.utils.template_formatters import TemplateFormatter
+
+from .prompt_messages import PromptMessagesMixin
 
 if TYPE_CHECKING:
     from anthropic.types import MessageParam
@@ -211,11 +212,11 @@ class PromptVersion(PromptMessagesMixin):
 
     def __dir__(self) -> list[str]:
         return [
+            "messages",
             "id",
             "format",
             "from_openai",
             "from_anthropic",
-            "messages",
         ]
 
     @property

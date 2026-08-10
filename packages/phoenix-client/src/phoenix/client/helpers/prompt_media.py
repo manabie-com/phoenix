@@ -30,6 +30,7 @@ __all__ = [
     "SUPPORTED_FILE_MEDIA_TYPES",
     "MediaReference",
     "ResolvedSource",
+    "addresses_phoenix",
     "media_file_name",
     "media_reference",
     "media_value_is_absent",
@@ -173,13 +174,45 @@ def reject_non_media(url: str, data: bytes, header_type: Optional[str]) -> None:
         )
 
 
+def _origin(url: httpx.URL) -> tuple[str, str, int]:
+    scheme = url.scheme.lower()
+    return scheme, url.host.lower(), url.port or (443 if scheme == "https" else 80)
+
+
+def addresses_phoenix(url: str, client: httpx.Client) -> bool:
+    """Whether `url` names the Phoenix instance `client` is configured for.
+
+    A URL that is not absolute is Phoenix's by construction — it is resolved
+    against the client's `base_url`. An absolute one is Phoenix's only if it names
+    the same origin.
+    """
+    if not url.startswith(("http://", "https://")):
+        return True
+    return _origin(httpx.URL(url)) == _origin(client.base_url)
+
+
 def fetch_url(url: str, client: Optional[httpx.Client]) -> tuple[bytes, Optional[str]]:
-    """GET `url`, reusing the caller's client so Phoenix auth and base_url apply.
+    """GET `url`, using the caller's Phoenix client only for Phoenix's own URLs.
+
+    Phoenix-hosted media needs that client: the URL is relative to its `base_url`
+    and the request has to carry its auth. A third-party URL needs the exact
+    opposite. The client's headers *are* the caller's Phoenix credentials, and
+    httpx applies client-level headers to every host it is pointed at — so
+    fetching `https://example.com/cat.png` through it would hand example.com a
+    working Phoenix API key. Third-party URLs are therefore fetched the same way
+    they are when no client was passed at all.
+
+    The cost is that a client's proxy, CA bundle and timeout do not apply to a
+    third-party fetch. A caller who needs them should read the bytes itself and
+    pass those, or let the server fetch the URL via `client.media.import_from_url`.
 
     Raises:
         MediaResolutionError: The response was not media. See `reject_non_media`.
     """
-    response = client.get(url) if client is not None else httpx.get(url, follow_redirects=True)
+    if client is not None and addresses_phoenix(url, client):
+        response = client.get(url)
+    else:
+        response = httpx.get(url, follow_redirects=True)
     response.raise_for_status()
     header_type = response.headers.get("content-type")
     reject_non_media(url, response.content, header_type)
@@ -200,8 +233,10 @@ def resolve_media(
     Args:
         value: The reference to resolve.
         media_type: A declared type, which always wins over detection.
-        client: Client used to fetch URLs. Required for Phoenix-hosted media,
-            whose relative URLs need a base_url and auth headers.
+        client: Client used to fetch Phoenix-hosted media, whose relative URLs
+            need a base_url and auth headers. Third-party URLs are fetched
+            without it, so its credentials never reach another host — see
+            `fetch_url`.
 
     Raises:
         MediaResolutionError: The reference could not be turned into bytes.

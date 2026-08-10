@@ -144,16 +144,28 @@ class TestImagesSurvive:
         )
         assert image_urls(to_openai(prompt)) == [url]
 
-    def test_inline_urls_forces_public_urls_to_be_inlined(self) -> None:
+    def test_inline_urls_forces_public_urls_to_be_inlined(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # `httpx.get` rather than the client's transport, because a URL on another
+        # host is deliberately not fetched through the caller's Phoenix client —
+        # that client's headers are Phoenix credentials. See `fetch_url`.
         url = "https://example.com/cat.png"
         prompt = make_prompt(
             [{"role": "user", "content": [{"type": "image", "image": {"url": url}}]}]
         )
 
-        def handler(request: httpx.Request) -> httpx.Response:
-            return httpx.Response(200, content=PNG_BYTES, headers={"content-type": "image/png"})
+        def fake_get(requested: str, **kwargs: Any) -> httpx.Response:
+            assert requested == url
+            return httpx.Response(
+                200,
+                content=PNG_BYTES,
+                headers={"content-type": "image/png"},
+                request=httpx.Request("GET", requested),
+            )
 
-        client = httpx.Client(transport=httpx.MockTransport(handler))
+        monkeypatch.setattr(httpx, "get", fake_get)
+        client = httpx.Client(base_url="http://phoenix.local")
         result = to_openai(prompt, client=client, inline_urls=True)
         assert image_urls(result) == [EXPECTED_DATA_URI]
 

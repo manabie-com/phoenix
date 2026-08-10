@@ -518,6 +518,12 @@ download off your network. The server refuses any URL that does not resolve to t
 public internet, and does not keep the URL — the prompt references stored media, so
 a run never depends on the third-party host again.
 
+A URL on another host is downloaded *without* your client, so your Phoenix API key
+is never sent to it. Neither is the client's proxy, CA bundle or timeout — read the
+bytes yourself and pass those if you need any of that. URLs on Phoenix's own origin,
+and `phoenix://media/<sha256>` references, still go through the client, which is
+where the credential belongs.
+
 Storage is content-addressed, so uploading the same file twice returns the same
 digest and stores one copy.
 
@@ -571,6 +577,10 @@ client.prompts.delete(prompt_identifier="my-prompt")
 `versions()` returns the same rich `PromptVersion` objects `get()` does, so each
 one can be formatted or read through `.messages`. Both `list()` and `versions()`
 follow pagination for you.
+
+`versions()` on a name that does not exist returns `[]` rather than raising — the
+endpoint has no not-found path, so a typo and a prompt with no versions look the
+same. Call `get()` if you need the two told apart.
 
 `delete()` removes the prompt and **all** of its versions, tags, and labels. It
 raises `ValueError` if the prompt does not exist, as `get()` does.

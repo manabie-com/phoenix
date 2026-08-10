@@ -1,7 +1,9 @@
 """Tests for the fork-owned ``client.media`` resource."""
 
 import base64
+import copy
 import json
+import pickle
 from pathlib import Path
 from typing import Any
 
@@ -154,6 +156,20 @@ class TestGet:
 
         content, media_type = Media(_sync(handler)).get(SHA)
         assert (content, media_type) == (PNG, "image/png")
+
+    def test_survives_copying_and_pickling(self) -> None:
+        """A tuple subclass inherits a `__getnewargs__` that hands the pair back as
+        one argument, which a two-argument `__new__` rejects — so without one of its
+        own, putting media through a process pool or a disk cache raises."""
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            return httpx.Response(200, content=PNG, headers={"content-type": "image/png"})
+
+        result = Media(_sync(handler)).get(SHA)
+
+        for clone in (copy.copy(result), copy.deepcopy(result), pickle.loads(pickle.dumps(result))):
+            assert isinstance(clone, FetchedMedia)
+            assert (clone.content, clone.media_type) == (PNG, "image/png")
 
     def test_strips_content_type_parameters(self) -> None:
         def handler(request: httpx.Request) -> httpx.Response:

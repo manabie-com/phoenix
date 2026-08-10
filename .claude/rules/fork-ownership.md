@@ -53,6 +53,23 @@ upstream's test file. The fix is a fork-owned helper plus one import and same-li
 **`src/phoenix/server/api/helpers/playground_media/`** — a module per provider, with only
 a 1–3 line delegation left in upstream's `playground_clients.py`.
 
+**Import a fork module into an upstream one *relatively*.** An absolute
+`from phoenix.client.resources.media import ...` is sorted into upstream's first-party
+block — in `client.py` it lands between `experiments` and `projects`, which is exactly
+where upstream inserts its next resource, so both sides insert at the same position and
+conflict. `from .resources.media import ...` sorts into isort's local-folder section
+instead, which upstream (absolute imports throughout) never writes to: the fork's line
+ends up alone, blank-line separated, at the end of the import area — shape 1/2 rather
+than shape 2-at-the-worst-spot. It costs the separating blank line, so the line count is
+a wash; the exposure is not. `packages/phoenix-client/src/phoenix/client/client.py`,
+`resources/prompts/__init__.py` and `types/prompts.py` all do this. Do not "tidy" them
+back to absolute.
+
+**Insert into an upstream list at the end upstream does not append to.** The fork adds
+`"messages"` to `PromptVersion.__dir__`'s list. Appending it after upstream's last entry
+put it exactly where upstream's next entry goes; it sits at the *head* of the list
+instead. `dir()` sorts the result, so position costs nothing.
+
 ## Where fork code goes
 
 - provider media handling → `src/phoenix/server/api/helpers/playground_media/`

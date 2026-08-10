@@ -90,9 +90,18 @@ class PromptsManagementMixin:
             Pagination is followed for you.
 
         Raises:
-            ValueError: If the prompt does not exist.
+            ValueError: If the server reports the prompt as missing (404).
             httpx.HTTPStatusError: If the HTTP request returned an unsuccessful
                 status code.
+
+        Note:
+            An unknown prompt is **not** an error here. This endpoint answers a
+            wrong identifier with an empty page rather than a 404, so it returns
+            ``[]`` — indistinguishable from a prompt that exists with no versions.
+            Check the identifier with
+            :meth:`~phoenix.client.resources.prompts.Prompts.get` if you need the
+            two told apart. The 404 is mapped because the route declares one, not
+            because it is what you will see.
 
         Example::
 
@@ -203,9 +212,13 @@ class AsyncPromptsManagementMixin:
             is followed for you.
 
         Raises:
-            ValueError: If the prompt does not exist.
+            ValueError: If the server reports the prompt as missing (404).
             httpx.HTTPStatusError: If the HTTP request returned an unsuccessful
                 status code.
+
+        Note:
+            An unknown prompt returns ``[]`` rather than raising. See
+            :meth:`PromptsManagementMixin.versions`.
 
         Example::
 

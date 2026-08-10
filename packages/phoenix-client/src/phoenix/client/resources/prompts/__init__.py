@@ -7,16 +7,14 @@ import httpx
 from httpx import HTTPStatusError
 
 from phoenix.client.__generated__ import v1
-from phoenix.client.resources.prompts.management import (
-    AsyncPromptsManagementMixin,
-    PromptsManagementMixin,
-)
 from phoenix.client.types.prompts import PromptVersion
 from phoenix.client.utils.encode_path_param import encode_path_param
 from phoenix.client.utils.server_requirements import (
     AsyncServerVersionGuard,
     ServerVersionGuard,
 )
+
+from .management import AsyncPromptsManagementMixin, PromptsManagementMixin
 
 logger = logging.getLogger(__name__)
 

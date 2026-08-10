@@ -10,6 +10,11 @@ This matters more now that a media variable is optional: "supplied but
 unresolvable must raise" is the only thing left standing between a mistyped
 reference and a corrupted run.
 
+The absolute URLs below are on the mock client's own origin deliberately.
+`fetch_url` hands a URL to the passed client only when it addresses that client's
+Phoenix instance, so a third-party URL would bypass the mock transport and reach
+the network. What happens to a third-party URL is `test_third_party_media_fetch.py`.
+
 A new test file on purpose (see .claude/rules/fork-ownership.md).
 """
 
@@ -53,18 +58,18 @@ class TestAWebPageIsNotMedia:
     def test_a_json_error_body_is_rejected(self) -> None:
         with client_returning(b'{"detail":"not found"}', "application/json") as client:
             with pytest.raises(MediaResolutionError, match="not media"):
-                resolve_media("https://example.com/cat.png", client=client)
+                resolve_media("http://phoenix.local/cat.png", client=client)
 
     def test_an_http_url_serving_a_page_is_rejected(self) -> None:
         with client_returning(SPA_HTML, "text/html") as client:
             with pytest.raises(MediaResolutionError, match="not media"):
-                resolve_media("https://example.com/gone.png", client=client)
+                resolve_media("http://phoenix.local/gone.png", client=client)
 
     def test_a_declared_media_type_does_not_launder_a_web_page(self) -> None:
         # A template claiming the reference is a PNG does not make the HTML one.
         with client_returning(SPA_HTML, "text/html") as client:
             with pytest.raises(MediaResolutionError, match="not media"):
-                resolve_media("https://example.com/cat.png", media_type="image/png", client=client)
+                resolve_media("http://phoenix.local/cat.png", media_type="image/png", client=client)
 
 
 class TestRealMediaStillResolves:
@@ -72,7 +77,7 @@ class TestRealMediaStillResolves:
 
     def test_an_image_resolves(self) -> None:
         with client_returning(PNG_BYTES, "image/png") as client:
-            data, media_type = resolve_media("https://example.com/cat.png", client=client)
+            data, media_type = resolve_media("http://phoenix.local/cat.png", client=client)
         assert data == PNG_BYTES
         assert media_type == "image/png"
 
@@ -80,13 +85,13 @@ class TestRealMediaStillResolves:
         # A misconfigured host serving a real PNG as text/plain is a working image,
         # and the signature is better evidence than the header.
         with client_returning(PNG_BYTES, "text/plain") as client:
-            data, _ = resolve_media("https://example.com/cat.png", client=client)
+            data, _ = resolve_media("http://phoenix.local/cat.png", client=client)
         assert data == PNG_BYTES
 
     def test_a_pdf_resolves(self) -> None:
         pdf = b"%PDF-1.4\n" + b"\x00" * 60
         with client_returning(pdf, "application/pdf") as client:
-            data, media_type = resolve_media("https://example.com/doc.pdf", client=client)
+            data, media_type = resolve_media("http://phoenix.local/doc.pdf", client=client)
         assert data == pdf
         assert media_type == "application/pdf"
 
@@ -94,7 +99,7 @@ class TestRealMediaStillResolves:
         # No signature and no text claim — an exotic format, not an error page.
         blob = b"\x01\x02\x03\x04" * 8
         with client_returning(blob, "application/octet-stream") as client:
-            data, _ = resolve_media("https://example.com/thing.bin", client=client)
+            data, _ = resolve_media("http://phoenix.local/thing.bin", client=client)
         assert data == blob
 
     def test_phoenix_hosted_media_resolves(self) -> None:

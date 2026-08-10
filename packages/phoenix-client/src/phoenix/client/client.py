@@ -6,7 +6,6 @@ import httpx
 
 from phoenix.client.resources.datasets import AsyncDatasets, Datasets
 from phoenix.client.resources.experiments import AsyncExperiments, Experiments
-from phoenix.client.resources.media import AsyncMediaClientMixin, MediaClientMixin
 from phoenix.client.resources.projects import AsyncProjects, Projects
 from phoenix.client.resources.prompts import AsyncPrompts, Prompts
 from phoenix.client.resources.sessions import AsyncSessions, Sessions
@@ -14,6 +13,8 @@ from phoenix.client.resources.spans import AsyncSpans, Spans
 from phoenix.client.resources.traces import AsyncTraces, Traces
 from phoenix.client.utils.config import get_base_url, get_env_client_headers
 from phoenix.client.utils.server_requirements import AsyncServerVersionGuard, ServerVersionGuard
+
+from .resources.media import AsyncMediaClientMixin, MediaClientMixin
 
 _DEFAULT_CLIENT_TIMEOUT = httpx.Timeout(connect=10.0, read=30.0, write=10.0, pool=10.0)
 

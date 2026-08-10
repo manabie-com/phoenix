@@ -85,7 +85,9 @@ class TestVersions:
         # The same rich object `get()` returns, not a raw TypedDict.
         assert isinstance(result[0], PromptVersion)
         assert result[0].id == "UHJvbXB0VmVyc2lvbjox"
-        assert result[0].messages[0]["content"][0]["text"] == "Write about {{topic}}"  # type: ignore[index]
+        content = result[0].messages[0]["content"]
+        assert not isinstance(content, str)
+        assert content[0]["text"] == "Write about {{topic}}"  # type: ignore[typeddict-item]
 
     def test_follows_pagination(self) -> None:
         calls: list[httpx.Request] = []
@@ -103,7 +105,21 @@ class TestVersions:
         assert [v.id for v in result] == ["v1", "v2"]
         assert calls[1].url.params.get("cursor") == "cursor-2"
 
-    def test_unknown_prompt_raises_value_error(self) -> None:
+    def test_an_unknown_prompt_comes_back_empty_not_404(self) -> None:
+        """What the server actually does: `list_prompt_versions` filters by
+        identifier and has no not-found path, so a wrong identifier is an empty
+        page. Documented on the method, because it is indistinguishable from a
+        prompt that exists with no versions."""
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            return httpx.Response(200, json={"data": [], "next_cursor": None})
+
+        assert Prompts(_sync(handler)).versions(prompt_identifier="nope") == []
+
+    def test_a_404_is_mapped_to_value_error(self) -> None:
+        """Defensive, not observed: the route declares a 404 response, so handle it
+        the way the sibling `get()` does rather than leaking an HTTPStatusError."""
+
         def handler(request: httpx.Request) -> httpx.Response:
             return httpx.Response(404, json={"detail": "Prompt not found"})
 

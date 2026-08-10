@@ -63,6 +63,17 @@ class FetchedMedia(tuple[bytes, str]):
     def __new__(cls, content: bytes, media_type: str) -> FetchedMedia:
         return super().__new__(cls, (content, media_type))
 
+    def __getnewargs__(self) -> tuple[bytes, str]:
+        """Arguments to rebuild this from, for ``copy`` and ``pickle``.
+
+        ``tuple`` supplies its own, which hands the whole pair back as a *single*
+        argument — and this ``__new__`` takes two, so copying or pickling a result
+        would fail with a ``TypeError`` naming the missing ``media_type``. Media
+        bytes crossing a process boundary or a disk cache is ordinary, so the
+        result has to survive the round trip.
+        """
+        return self[0], self[1]
+
     @property
     def content(self) -> bytes:
         """The raw media bytes."""
@@ -163,6 +174,10 @@ class Media:
             uploaded. Use :meth:`import_from_url` to have the server fetch it
             instead, which is what you want when only the server can reach the
             host, or when the download should not cross your network twice.
+
+            A URL on another host is fetched without this client, so your Phoenix
+            credentials are never sent to it — and neither is the client's proxy
+            or timeout configuration. Pass the bytes yourself if you need those.
 
         Example::
 
@@ -404,7 +419,20 @@ class MediaClientMixin:
     setter untouched, and matches ``Prompts.tags``, which does the same.
     """
 
-    _client: httpx.Client
+    @property
+    def _client(self) -> httpx.Client:
+        """The HTTP client ``Client`` was configured with.
+
+        Declared as a property rather than as ``_client: httpx.Client``, because
+        ``Client`` declares ``_client`` as a property too, and a property
+        overriding a plain variable is an error under pyright strict — which CI
+        runs. The prompt mixins keep the variable form for the mirror-image
+        reason: ``Prompts`` assigns ``self._client`` in ``__init__``, and a
+        read-only property here would refuse that assignment.
+
+        Never reached: every class using this mixin supplies its own.
+        """
+        raise NotImplementedError
 
     @property
     def media(self) -> Media:
@@ -422,7 +450,14 @@ class AsyncMediaClientMixin:
     See :class:`MediaClientMixin`.
     """
 
-    _client: httpx.AsyncClient
+    @property
+    def _client(self) -> httpx.AsyncClient:
+        """The HTTP client ``AsyncClient`` was configured with.
+
+        A property for the reason given on :class:`MediaClientMixin`. Never
+        reached: every class using this mixin supplies its own.
+        """
+        raise NotImplementedError
 
     @property
     def media(self) -> AsyncMedia:
