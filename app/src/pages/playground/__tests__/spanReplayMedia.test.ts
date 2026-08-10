@@ -137,3 +137,53 @@ describe("spanMessageImages", () => {
     });
   });
 });
+
+describe("spanMessageImages media-type gate", () => {
+  /** A span `contents` entry whose image is an inline payload of the given type. */
+  const inlineImagePart = (mediaType: string) => ({
+    message_content: {
+      type: "image",
+      image: { image: { url: `data:${mediaType};base64,QQ==` } },
+    },
+  });
+
+  it("carries a supported inline image", () => {
+    expect(spanMessageImages([inlineImagePart("image/webp")])).toEqual({
+      images: [
+        {
+          image: {
+            url: "data:image/webp;base64,QQ==",
+            mediaType: "image/webp",
+          },
+        },
+      ],
+    });
+  });
+
+  it("normalizes image/jpg, which the server only accepts as image/jpeg", () => {
+    expect(spanMessageImages([inlineImagePart("image/jpg")])).toEqual({
+      images: [
+        {
+          image: { url: "data:image/jpg;base64,QQ==", mediaType: "image/jpeg" },
+        },
+      ],
+    });
+  });
+
+  it("skips a type the server refuses, rather than letting it abort the run", () => {
+    // PromptChatTemplateInput.to_orm converts the whole template in one pass, so an
+    // unsupported part is not a lost attachment — it is a dead run.
+    for (const mediaType of ["image/bmp", "image/svg+xml", "text/plain"]) {
+      expect(spanMessageImages([inlineImagePart(mediaType)])).toEqual({});
+    }
+  });
+
+  it("still carries a stored reference, whose type the run resolves", () => {
+    const url = `phoenix://media/${"f".repeat(64)}`;
+    expect(
+      spanMessageImages([
+        { message_content: { type: "image", image: { image: { url } } } },
+      ])
+    ).toEqual({ images: [{ image: { url, mediaType: "image/png" } }] });
+  });
+});

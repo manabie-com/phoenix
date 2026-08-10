@@ -18,6 +18,6 @@ export {
   withRawSpanInputMedia,
 } from "./spanRawInputMessages";
 export {
-  withoutInputMessagesError,
+  spanInputParsingErrors,
   withoutOutputMessagesError,
 } from "./spanReplayErrors";

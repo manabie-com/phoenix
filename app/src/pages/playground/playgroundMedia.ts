@@ -4,8 +4,13 @@ import type {
   PlaygroundInput,
   PlaygroundInstance,
 } from "@phoenix/store/playground";
+import { dataUrlMediaType } from "@phoenix/utils/inlineMediaPayload";
 import { makeImagePart } from "@phoenix/utils/mediaParts";
 import { isHostedMediaUrl } from "@phoenix/utils/mediaUtils";
+import {
+  isSupportedImageMediaType,
+  normalizeMediaType,
+} from "@phoenix/utils/supportedMediaTypes";
 
 /**
  * Which media a playground template declares, and of what kind.
@@ -217,12 +222,6 @@ export const mediaContentPartInputs = (message: {
  */
 export const REPLAYED_STORED_IMAGE_MEDIA_TYPE = "image/png";
 
-/** The media type a `data:` URL declares, or null when it declares none. */
-const inlineMediaType = (url: string): string | null => {
-  const match = /^data:([-\w.+]+\/[-\w.+]+)[;,]/.exec(url);
-  return match ? match[1].toLowerCase() : null;
-};
-
 /**
  * The images a recorded message carried, ready to spread onto its replayed message.
  *
@@ -249,13 +248,16 @@ export const spanMessageImages = (
     if (!url) {
       continue;
     }
-    const mediaType = isHostedMediaUrl(url)
+    const declared = isHostedMediaUrl(url)
       ? REPLAYED_STORED_IMAGE_MEDIA_TYPE
-      : inlineMediaType(url);
-    if (mediaType == null) {
+      : dataUrlMediaType(url);
+    // Gated on the shared list for the same reason the raw-payload reader is: a type
+    // the server refuses aborts the whole template conversion, so one unusable
+    // attachment must cost only itself.
+    if (declared == null || !isSupportedImageMediaType(declared)) {
       continue;
     }
-    const image = makeImagePart(url, mediaType);
+    const image = makeImagePart(url, normalizeMediaType(declared));
     if (image) {
       images.push(image);
     }

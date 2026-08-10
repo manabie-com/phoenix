@@ -416,3 +416,113 @@ describe("withRawSpanInputMedia", () => {
     expect(withRawSpanInputMedia(parsed, textOnly)).toBe(parsed);
   });
 });
+
+describe("rawSpanInputMessages: shapes found during review", () => {
+  it("reads the responses API's `instructions` as the system prompt", () => {
+    const messages = rawSpanInputMessages(
+      attributes({
+        model: "gpt-4o",
+        instructions: "Answer in one sentence.",
+        input: [{ role: "user", content: "hi", type: "message" }],
+      })
+    );
+    expect(messages).toEqual([
+      expect.objectContaining({
+        role: "system",
+        content: "Answer in one sentence.",
+      }),
+      expect.objectContaining({ role: "user", content: "hi" }),
+    ]);
+  });
+
+  it("reads a payload recorded as a bare list of messages", () => {
+    const messages = rawSpanInputMessages(
+      attributes([
+        { role: "system", content: "Be terse." },
+        {
+          role: "user",
+          content: [
+            { type: "text", text: "What is this?" },
+            { type: "image_url", image_url: { url: PNG_DATA_URL } },
+          ],
+        },
+      ])
+    );
+    expect(messages?.[0]).toMatchObject({
+      role: "system",
+      content: "Be terse.",
+    });
+    expect(messages?.[1]).toMatchObject({
+      role: "user",
+      images: [{ image: { url: PNG_DATA_URL, mediaType: "image/png" } }],
+    });
+  });
+
+  it("keeps the id a tool result answers, so the turn is not an orphan", () => {
+    const messages = rawSpanInputMessages(
+      attributes({
+        messages: [
+          { role: "user", content: "weather?" },
+          { role: "tool", tool_call_id: "call_1", content: "72F" },
+        ],
+      })
+    );
+    expect(messages?.[1]).toMatchObject({
+      role: "tool",
+      content: "72F",
+      toolCallId: "call_1",
+    });
+  });
+
+  it("reads Anthropic's tool_use_id under the same field", () => {
+    const messages = rawSpanInputMessages(
+      attributes({
+        messages: [{ role: "user", content: "ok", tool_use_id: "toolu_1" }],
+      })
+    );
+    expect(messages?.[0]).toMatchObject({ toolCallId: "toolu_1" });
+  });
+
+  it("normalizes image/jpg on the raw path too", () => {
+    const messages = rawSpanInputMessages(
+      attributes({
+        messages: [
+          {
+            role: "user",
+            content: [
+              {
+                type: "image_url",
+                image_url: { url: "data:image/jpg;base64,QQ==" },
+              },
+            ],
+          },
+        ],
+      })
+    );
+    expect(messages?.[0]).toMatchObject({
+      images: [
+        {
+          image: { url: "data:image/jpg;base64,QQ==", mediaType: "image/jpeg" },
+        },
+      ],
+    });
+  });
+
+  it("skips a base64 payload whose length cannot decode", () => {
+    const messages = rawSpanInputMessages(
+      attributes({
+        messages: [
+          {
+            role: "user",
+            content: [
+              { type: "text", text: "kept" },
+              { inline_data: { mime_type: "image/png", data: "QQQ" } },
+            ],
+          },
+        ],
+      })
+    );
+    expect(messages?.[0]).toMatchObject({ content: "kept" });
+    expect(messages?.[0]).not.toHaveProperty("images");
+  });
+});

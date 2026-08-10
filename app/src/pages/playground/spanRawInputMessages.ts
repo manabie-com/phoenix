@@ -39,27 +39,13 @@ import {
 } from "@phoenix/utils/inlineMediaPayload";
 import { makeFilePart, makeImagePart } from "@phoenix/utils/mediaParts";
 import { isHostedMediaUrl } from "@phoenix/utils/mediaUtils";
+import {
+  mediaKindForType,
+  normalizeMediaType,
+} from "@phoenix/utils/supportedMediaTypes";
 
 import { REPLAYED_STORED_IMAGE_MEDIA_TYPE } from "./playgroundMedia";
 import { chatMessageRolesSchema } from "./schemas";
-
-/**
- * The media types a run accepts, mirroring `SUPPORTED_IMAGE_MEDIA_TYPES` and
- * `SUPPORTED_FILE_MEDIA_TYPES` in `phoenix/db/types/media.py`.
- *
- * Checked here so that an unsupported type is left out of the template rather than
- * carried into a run the server refuses, which would cost the whole replay rather
- * than one attachment.
- */
-const SUPPORTED_IMAGE_MEDIA_TYPES = new Set([
-  "image/png",
-  "image/jpeg",
-  "image/gif",
-  "image/webp",
-  "image/heic",
-  "image/heif",
-]);
-const SUPPORTED_FILE_MEDIA_TYPES = new Set(["application/pdf"]);
 
 /** Media found on a request part, in the form a playground message holds it. */
 type FoundMedia = { image: ImagePart } | { file: FilePart };
@@ -115,29 +101,33 @@ const mediaPart = (
   if (mediaType == null) {
     return null;
   }
-  if (SUPPORTED_IMAGE_MEDIA_TYPES.has(mediaType)) {
-    const image = makeImagePart(url, mediaType);
-    return image ? { image } : null;
+  const normalized = normalizeMediaType(mediaType);
+  switch (mediaKindForType(normalized)) {
+    case "image": {
+      const image = makeImagePart(url, normalized);
+      return image ? { image } : null;
+    }
+    case "file": {
+      const file = makeFilePart(url, normalized);
+      return file ? { file } : null;
+    }
+    default:
+      return null;
   }
-  if (SUPPORTED_FILE_MEDIA_TYPES.has(mediaType)) {
-    const file = makeFilePart(url, mediaType);
-    return file ? { file } : null;
-  }
-  return null;
 };
 
-/** A media type built from a provider's bare format name, e.g. Bedrock's `"png"`. */
+/**
+ * A media type built from a provider's bare format name, e.g. Bedrock's `"png"`.
+ *
+ * No aliasing here — `normalizeMediaType` turns `image/jpg` into `image/jpeg` for
+ * every path, so this only has to join the two halves.
+ */
 const mediaTypeFromFormat = (
   format: unknown,
   prefix: string
 ): string | null => {
-  const name = asString(format)?.toLowerCase();
-  if (name == null) {
-    return null;
-  }
-  return prefix === "image" && name === "jpg"
-    ? "image/jpeg"
-    : `${prefix}/${name}`;
+  const name = asString(format);
+  return name == null ? null : `${prefix}/${name}`;
 };
 
 /**
@@ -172,11 +162,9 @@ const readPartMedia = (part: Record<string, unknown>): FoundMedia | null => {
         payload
       );
     }
-    // Bedrock nests the bytes one level further, beside a bare format name.
-    const bytes = asString(pick(source, "bytes"));
-    if (bytes) {
-      return mediaPart(null, bytes);
-    }
+    // No `bytes` branch here: Bedrock keeps its bytes beside a bare `format` name one
+    // level up, handled below. Reading them here would mean a payload with no declared
+    // type, which `mediaPart` can do nothing with.
   }
 
   // OpenAI: `image_url: {url}`, or the same key holding the URL directly.
@@ -296,16 +284,24 @@ const chatRole = (role: unknown): ChatMessageRole => {
   return DEFAULT_CHAT_ROLE;
 };
 
-/** A playground message, with `images` and `files` left off when there are none. */
+/**
+ * A playground message, with the fields it has nothing for left off.
+ *
+ * `toolCallId` is carried when the payload names one, so a recovered tool result still
+ * says which call it answers. Without it the turn replays as an orphan, and the
+ * playground sends a tool message the provider cannot match.
+ */
 const chatMessage = (
   role: ChatMessageRole,
-  { text, images, files }: { text: string | undefined } & MessageMediaLists
+  { text, images, files }: { text: string | undefined } & MessageMediaLists,
+  toolCallId?: string | null
 ): ChatMessage => ({
   id: generateMessageId(),
   role,
   content: text,
   ...(images.length > 0 ? { images } : {}),
   ...(files.length > 0 ? { files } : {}),
+  ...(toolCallId ? { toolCallId } : {}),
 });
 
 /**
@@ -336,7 +332,9 @@ const systemMessage = (
       container,
       "system",
       "system_instruction",
-      "systemInstruction"
+      "systemInstruction",
+      // The responses API's name for it, alongside the `input` list.
+      "instructions"
     );
     if (instruction === undefined) {
       continue;
@@ -378,11 +376,15 @@ const rawInputPayload = (
   if (value == null) {
     return null;
   }
+  let parsed: unknown;
   try {
-    return asRecord(JSON.parse(value));
+    parsed = JSON.parse(value);
   } catch {
     return null;
   }
+  // Some instrumentation records the message list alone rather than the whole request.
+  // Wrapping it lets the same reader handle both without a second code path.
+  return Array.isArray(parsed) ? { messages: parsed } : asRecord(parsed);
 };
 
 /** The messages a payload describes, system prompt first. */
@@ -397,6 +399,10 @@ const payloadMessages = (
     .map((message) => ({
       role: chatRole(pick(message, "role")),
       content: readContent(pick(message, "content", "parts")),
+      // OpenAI and Bedrock say `tool_call_id`; Anthropic says `tool_use_id`.
+      toolCallId: asString(
+        pick(message, "tool_call_id", "toolCallId", "tool_use_id")
+      ),
     }))
     // A responses-API list holds items that are not messages at all — a
     // `function_call` or its output — and they read as a message with nothing in it.
@@ -407,7 +413,9 @@ const payloadMessages = (
         content.images.length > 0 ||
         content.files.length > 0
     )
-    .map(({ role, content }) => chatMessage(role, content));
+    .map(({ role, content, toolCallId }) =>
+      chatMessage(role, content, toolCallId)
+    );
   const system = systemMessage(payload);
   return system ? [system, ...built] : built;
 };

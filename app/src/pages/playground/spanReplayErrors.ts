@@ -26,26 +26,48 @@ import {
 } from "./constants";
 
 /**
- * The input errors worth reporting, given what the template ended up holding.
+ * What a span recovered from its raw request is honest to say about itself.
+ *
+ * Not empty, deliberately. Suppressing the missing-messages error outright said the
+ * replay was faithful, and it is not: the raw reader carries text and media but not
+ * tool calls or tool results, and it leaves out turns that hold nothing else — so a
+ * tool-using conversation comes back with turns missing. A clean banner over an
+ * approximated template teaches exactly the dismissal habit that an over-reported one
+ * does, which is the reason the output filter exists at all.
+ *
+ * So the error is replaced rather than removed: the reader is told the template is
+ * complete enough to run and where it stops being faithful.
+ */
+export const SPAN_INPUT_RECOVERED_FROM_RAW_REQUEST =
+  "Span input messages were recovered from the raw request recorded on this span. " +
+  "Tool calls and tool results are not carried over, so this template may be " +
+  "incomplete.";
+
+/**
+ * The input reports worth showing, given what the template ended up holding.
  *
  * `getTemplateMessagesFromAttributes` reports that it could not read
  * `llm.input_messages`, which is true and is not the whole story: the fork then reads
- * the messages out of the raw request the span recorded, and when that works the
- * template is complete and the error describes a detour rather than a failure.
+ * the conversation out of the raw request the span recorded. When that works the
+ * failure becomes a caveat, and it is downgraded to one rather than dropped.
  *
- * Filtering here rather than returning a different error from that function keeps the
+ * Mapping here rather than returning a different error from that function keeps the
  * recovery out of upstream's parser entirely — it goes on reporting what it could not
- * read, and this decides whether the reader needs to hear it.
+ * read, and this decides what the reader needs to hear.
  *
  * @param errors The errors gathered while reading the input messages.
  * @param messages The messages the template ended up with, if any.
  */
-export const withoutInputMessagesError = (
+export const spanInputParsingErrors = (
   errors: string[],
   messages: readonly unknown[] | null | undefined
 ): string[] =>
   messages?.length
-    ? errors.filter((error) => error !== INPUT_MESSAGES_PARSING_ERROR)
+    ? errors.map((error) =>
+        error === INPUT_MESSAGES_PARSING_ERROR
+          ? SPAN_INPUT_RECOVERED_FROM_RAW_REQUEST
+          : error
+      )
     : errors;
 
 /**

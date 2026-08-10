@@ -88,7 +88,7 @@ import {
   mediaContentPartInputs,
   spanMessageImages,
   withMediaVariableValues,
-  withoutInputMessagesError,
+  spanInputParsingErrors,
   withoutOutputMessagesError,
   withRawSpanInputMedia,
 } from "./fork";
@@ -1165,7 +1165,7 @@ export function transformSpanAttributesToPlaygroundInstance(
     playgroundInput:
       variables != null ? { variablesValueCache: variables } : undefined,
     parsingErrors: [
-      ...withoutInputMessagesError(messageParsingErrors, mediaMessages),
+      ...spanInputParsingErrors(messageParsingErrors, mediaMessages),
       ...withoutOutputMessagesError(outputParsingErrors),
       ...modelConfigParsingErrors,
       ...toolsParsingErrors,

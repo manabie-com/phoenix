@@ -100,9 +100,20 @@ function toBase64(bytes: Uint8Array): string {
   return btoa(binary);
 }
 
-/** Whether a string is base64 once its line breaks are taken out. */
+/**
+ * Whether a string is base64 once its line breaks are taken out.
+ *
+ * Length is checked as well as the alphabet: base64 encodes three bytes to four
+ * characters, so a length that is not a multiple of four cannot decode. Without that
+ * check a stray token beside a declared media type became a malformed `data:` URL that
+ * failed server-side, instead of being skipped here.
+ */
 function isBase64(value: string): boolean {
-  return value.length > 0 && /^[A-Za-z0-9+/]+={0,2}$/.test(value);
+  return (
+    value.length > 0 &&
+    value.length % 4 === 0 &&
+    /^[A-Za-z0-9+/]+={0,2}$/.test(value)
+  );
 }
 
 /**
