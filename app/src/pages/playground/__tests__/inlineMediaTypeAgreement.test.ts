@@ -14,7 +14,7 @@
  * be handed, so the next correction applied to one half fails here rather than in a
  * replay.
  */
-import { spanMessageImages } from "../playgroundMedia";
+import { spanMessageParts } from "../playgroundMedia";
 import { rawSpanInputMessages } from "../spanRawInputMessages";
 
 /** The media type a `data:` URL declares in its header. */
@@ -62,7 +62,7 @@ const shapes: {
     name: "contents: message_content.image.image.url",
     parts: (mediaType) =>
       inlineParts(
-        spanMessageImages([
+        spanMessageParts([
           {
             message_content: {
               type: "image",

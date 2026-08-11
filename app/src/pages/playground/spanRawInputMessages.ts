@@ -41,7 +41,10 @@ import {
   normalizeMediaType,
 } from "@phoenix/utils/supportedMediaTypes";
 
-import { REPLAYED_STORED_IMAGE_MEDIA_TYPE } from "./playgroundMedia";
+import {
+  joinTextParts,
+  REPLAYED_STORED_IMAGE_MEDIA_TYPE,
+} from "./playgroundMedia";
 import { chatMessageRolesSchema } from "./schemas";
 
 /** Media found on a request part, in the form a playground message holds it. */
@@ -256,8 +259,7 @@ const readContent = (
       media.files.push(found.file);
     }
   }
-  const text = texts.filter(Boolean).join("\n\n");
-  return { text: text || undefined, ...media };
+  return { text: joinTextParts(texts), ...media };
 };
 
 /**
