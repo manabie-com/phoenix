@@ -55,7 +55,7 @@ dependencies = [
   "arize-phoenix-sqlean",
   "cachetools",
   "python-multipart",  # see https://www.starlette.io/#dependencies
-  "arize-phoenix-evals>=3.3.0",
+  "arize-phoenix-evals>=3.4.0",
   "arize-phoenix-otel>=0.17.0",
   "fastapi>=0.137.0",  # 0.137 keeps included routers as a lazy _IncludedRouter tree; older versions raise AssertionError on 204 routes, see https://github.com/Arize-ai/phoenix/issues/12384
   "fastmcp-slim[client,server]>=3.4.2,<4",  # client powers pydantic-ai's MCPToolset used by the agent assistant; server powers the in-process MCP server mounted at /mcp. Cap below 4: FastMCP 4 is an SDK-v2 engine swap (mcp_types, httpx2, sampling removals) still in prerelease.
@@ -108,7 +108,7 @@ dev = [
   "ldap3",
   "litellm>=1.83.14; python_version < '3.14'",  # >=1.83.14 fixes CVE-2026-42208; excluded because upstream metadata does not support Python 3.14 (https://github.com/BerriAI/litellm/issues/26343)
   "modal>=1.2.0",  # type-checking only; runtime is gated by the [modal] extra
-  "vercel>=0.5.8",  # type-checking only; runtime is gated by the [vercel] extra. 0.5.8 exposes `network_policy` on AsyncSandbox.create.
+  "vercel>=0.5.8,<0.8",  # type-checking only; runtime is gated by the [vercel] extra. 0.5.8 exposes `network_policy` on AsyncSandbox.create.
   "wasmtime>=15.0",  # bundled in dev so the local WASM sandbox runs without an extra opt-in; the [wasm] extra still gates production installs
   "mypy==2.3.0",
   "mypy-boto3-bedrock-runtime",
@@ -193,7 +193,7 @@ daytona = [
   "daytona-sdk>=0.140.0",
 ]
 vercel = [
-  "vercel>=0.5.8",  # 0.5.8 exposes `network_policy` on AsyncSandbox.create
+  "vercel>=0.5.8,<0.8",  # 0.5.8 exposes `network_policy` on AsyncSandbox.create; 0.8 requires a sandbox API migration.
   "websockets>=14.0",
 ]
 modal = [
@@ -238,7 +238,7 @@ container = [
   "wasmtime>=15.0",
   "e2b-code-interpreter>=0.0.12",
   "daytona-sdk>=0.140.0",
-  "vercel>=0.5.8",
+  "vercel>=0.5.8,<0.8",
   "websockets>=14.0",
   "modal>=1.2.0",
 ]

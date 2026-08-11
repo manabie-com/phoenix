@@ -91,6 +91,7 @@ from phoenix.server.api.types.ExperimentRepeatedRunGroup import (
     parse_experiment_repeated_run_group_node_id,
 )
 from phoenix.server.api.types.ExperimentRun import ExperimentRun
+from phoenix.server.api.types.ExperimentTag import ExperimentTag
 from phoenix.server.api.types.GenerativeModel import GenerativeModel
 from phoenix.server.api.types.GenerativeModelCustomProvider import (
     GenerativeModelCustomProvider,
@@ -1066,6 +1067,8 @@ class Query:
             return ExperimentRun(id=node_id)
         elif type_name == ExperimentJob.__name__:
             return ExperimentJob(id=node_id)
+        elif type_name == ExperimentTag.__name__:
+            return ExperimentTag(id=node_id)
         elif type_name == User.__name__:
             if int((user := info.context.user).identity) != node_id and not user.is_admin:
                 raise Unauthorized(MSG_ADMIN_ONLY)

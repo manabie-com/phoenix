@@ -1,5 +1,17 @@
 # @arizeai/phoenix-client
 
+## 7.4.0
+
+### Minor Changes
+
+- 90729f3: Add `updatePrompt` for `PATCH /v1/prompts/{prompt_identifier}` (description and metadata; requires Phoenix server >= 19.18.0).
+
+## 7.3.1
+
+### Patch Changes
+
+- c892873: Add generated types for the experiment tag REST routes (`GET`/`POST /v1/experiments/{experiment_id}/tags` and `DELETE /v1/experiments/{experiment_id}/tags/{tag_identifier}`)
+
 ## 7.3.0
 
 ### Minor Changes
