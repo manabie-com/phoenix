@@ -220,10 +220,34 @@ export const mediaContentPartInputs = (message: {
 export const REPLAYED_STORED_IMAGE_MEDIA_TYPE = "image/png";
 
 /**
- * The images a recorded message carried, ready to spread onto its replayed message.
+ * How a message's text parts are rejoined into one editor's worth of text.
  *
- * Images only. OpenInference has no content-part convention for documents, so a span
- * never records one, and there is nothing to read.
+ * A blank line between them, because a part boundary is a paragraph boundary in every
+ * payload that uses more than one — a heading per section is the common shape. Shared
+ * with the raw-request reader so a span replayed down either path reads the same.
+ */
+export const joinTextParts = (texts: readonly string[]): string | undefined =>
+  texts.filter(Boolean).join("\n\n") || undefined;
+
+/**
+ * The text and images a recorded message carried, ready to spread onto its replay.
+ *
+ * Images and, when a turn holds more than one, its text.
+ *
+ * Upstream takes `contents.find(type === "text")` — the *first* text part, the rest
+ * discarded, with no warning and a TODO admitting it. That is fine until a payload puts
+ * each section in its own part, which is what an AI-marking prompt does: question in
+ * one, student answer in the next. The answer being graded was silently dropped and the
+ * replay looked complete. Returning `content` here overrides upstream's value by spread
+ * order — this object is spread immediately after its `content:` property — so the fix
+ * needs no edit to upstream's expression.
+ *
+ * Left alone when a turn has one text part or none: one part joins to itself, and none
+ * must stay `undefined` rather than becoming an empty string. So single-part messages
+ * come out byte-identical to before.
+ *
+ * Documents are not read here. OpenInference has no content-part convention for them,
+ * so a span never records one.
  *
  * An external `http(s)` image URL is skipped rather than carried. A chat completion
  * takes only stored references and inline data URLs — an external one is refused with
@@ -236,11 +260,16 @@ export const REPLAYED_STORED_IMAGE_MEDIA_TYPE = "image/png";
  *
  * @param contents The message's `contents` from the span attributes, if it had any.
  */
-export const spanMessageImages = (
+export const spanMessageParts = (
   contents: SpanMessageContentPart[] | undefined
-): { images?: ImagePart[] } => {
+): { content?: string; images?: ImagePart[] } => {
   const images: ImagePart[] = [];
+  const texts: string[] = [];
   for (const part of contents ?? []) {
+    const text = part.message_content.text;
+    if (part.message_content.type === "text" && typeof text === "string") {
+      texts.push(text);
+    }
     const url = part.message_content.image?.image?.url;
     if (!url) {
       continue;
@@ -262,5 +291,9 @@ export const spanMessageImages = (
       images.push(image);
     }
   }
-  return images.length > 0 ? { images } : {};
+  return {
+    // Only when upstream would have thrown text away.
+    ...(texts.length > 1 ? { content: joinTextParts(texts) } : {}),
+    ...(images.length > 0 ? { images } : {}),
+  };
 };

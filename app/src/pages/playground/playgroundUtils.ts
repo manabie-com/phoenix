@@ -86,7 +86,7 @@ import {
 } from "./constants";
 import {
   mediaContentPartInputs,
-  spanMessageImages,
+  spanMessageParts,
   withMediaVariableValues,
   spanInputParsingErrors,
   withoutOutputMessagesError,
@@ -255,7 +255,7 @@ function processAttributeMessagesToChatMessage({
         : typeof message.content === "string"
           ? message.content
           : undefined,
-      ...spanMessageImages(message.contents),
+      ...spanMessageParts(message.contents),
       toolCalls: processAttributeToolCalls({
         provider,
         toolCalls: message.tool_calls,

@@ -10,7 +10,7 @@
  */
 export {
   mediaContentPartInputs,
-  spanMessageImages,
+  spanMessageParts,
   withMediaVariableValues,
 } from "./playgroundMedia";
 export {

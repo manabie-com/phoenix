@@ -2,7 +2,7 @@
  * The media types a run accepts, and what each one is.
  *
  * One list, because three had already drifted apart. `spanRawInputMessages` kept its
- * own image and file sets, `spanMessageImages` kept none at all and so let anything
+ * own image and file sets, `spanMessageParts` kept none at all and so let anything
  * through, and `mediaUtils` kept a third copy as an extension map. A media type that
  * only one of them knows about is a media type the paths disagree on — and the
  * disagreement is not symmetric, because a type the server refuses does not merely

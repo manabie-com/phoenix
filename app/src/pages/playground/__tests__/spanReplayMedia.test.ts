@@ -6,7 +6,7 @@
  * playground opened on its default template and reported a parsing error, losing the
  * text messages that parsed perfectly well.
  */
-import { spanMessageImages } from "../playgroundMedia";
+import { spanMessageParts } from "../playgroundMedia";
 import { getTemplateMessagesFromAttributes } from "../playgroundUtils";
 
 const DIGEST = "b".repeat(64);
@@ -98,33 +98,33 @@ describe("getTemplateMessagesFromAttributes", () => {
   });
 });
 
-describe("spanMessageImages", () => {
+describe("spanMessageParts", () => {
   it("carries a stored reference with a supported placeholder media type", () => {
-    expect(spanMessageImages([imagePart(STORED_URL)])).toEqual({
+    expect(spanMessageParts([imagePart(STORED_URL)])).toEqual({
       images: [{ image: { url: STORED_URL, mediaType: "image/png" } }],
     });
   });
 
   it("takes an inline image's media type from its data URL", () => {
-    expect(spanMessageImages([imagePart(INLINE_URL)])).toEqual({
+    expect(spanMessageParts([imagePart(INLINE_URL)])).toEqual({
       images: [{ image: { url: INLINE_URL, mediaType: "image/jpeg" } }],
     });
   });
 
   it("skips an external URL, which a chat completion would refuse", () => {
     expect(
-      spanMessageImages([imagePart("https://example.com/cat.png")])
+      spanMessageParts([imagePart("https://example.com/cat.png")])
     ).toEqual({});
   });
 
   it("adds no images field to a message that carried none", () => {
-    expect(spanMessageImages([textPart("just words")])).toEqual({});
-    expect(spanMessageImages(undefined)).toEqual({});
+    expect(spanMessageParts([textPart("just words")])).toEqual({});
+    expect(spanMessageParts(undefined)).toEqual({});
   });
 
   it("keeps every image on a message, in the order recorded", () => {
     expect(
-      spanMessageImages([
+      spanMessageParts([
         imagePart(STORED_URL),
         textPart("and"),
         imagePart(INLINE_URL),
@@ -138,7 +138,7 @@ describe("spanMessageImages", () => {
   });
 });
 
-describe("spanMessageImages media-type gate", () => {
+describe("spanMessageParts media-type gate", () => {
   /** A span `contents` entry whose image is an inline payload of the given type. */
   const inlineImagePart = (mediaType: string) => ({
     message_content: {
@@ -148,7 +148,7 @@ describe("spanMessageImages media-type gate", () => {
   });
 
   it("carries a supported inline image", () => {
-    expect(spanMessageImages([inlineImagePart("image/webp")])).toEqual({
+    expect(spanMessageParts([inlineImagePart("image/webp")])).toEqual({
       images: [
         {
           image: {
@@ -164,7 +164,7 @@ describe("spanMessageImages media-type gate", () => {
     // Normalizing only the field produced `{url: "data:image/jpg;…", mediaType:
     // "image/jpeg"}`, which `MediaContent` rejects because the two disagree — so the
     // alias that was supposed to rescue the attachment killed the run instead.
-    expect(spanMessageImages([inlineImagePart("image/jpg")])).toEqual({
+    expect(spanMessageParts([inlineImagePart("image/jpg")])).toEqual({
       images: [
         {
           image: {
@@ -185,7 +185,7 @@ describe("spanMessageImages media-type gate", () => {
       "data:image/png;base64,QQQ",
     ]) {
       expect(
-        spanMessageImages([
+        spanMessageParts([
           { message_content: { type: "image", image: { image: { url } } } },
         ])
       ).toEqual({});
@@ -196,16 +196,106 @@ describe("spanMessageImages media-type gate", () => {
     // PromptChatTemplateInput.to_orm converts the whole template in one pass, so an
     // unsupported part is not a lost attachment — it is a dead run.
     for (const mediaType of ["image/bmp", "image/svg+xml", "text/plain"]) {
-      expect(spanMessageImages([inlineImagePart(mediaType)])).toEqual({});
+      expect(spanMessageParts([inlineImagePart(mediaType)])).toEqual({});
     }
   });
 
   it("still carries a stored reference, whose type the run resolves", () => {
     const url = `phoenix://media/${"f".repeat(64)}`;
     expect(
-      spanMessageImages([
+      spanMessageParts([
         { message_content: { type: "image", image: { image: { url } } } },
       ])
     ).toEqual({ images: [{ image: { url, mediaType: "image/png" } }] });
+  });
+});
+
+describe("spanMessageParts: a turn split across several text parts", () => {
+  /** The shape an AI-marking prompt records: one section per part. */
+  const QUESTION = "# Question\n**Text:** What is AGI in AI";
+  const ANSWER =
+    "# Student Answer\n**Answer:** Artificial General Intelligence is…";
+
+  it("keeps every text part, not just the first", () => {
+    // Upstream takes `contents.find(type === "text")`, so the second part — the answer
+    // being graded — was dropped with no warning. Found on a real staging span.
+    expect(spanMessageParts([textPart(QUESTION), textPart(ANSWER)])).toEqual({
+      content: `${QUESTION}\n\n${ANSWER}`,
+    });
+  });
+
+  it("leaves a single text part to upstream, byte for byte", () => {
+    // No `content` key at all, so upstream's own value stands and nothing shifts for
+    // the overwhelming majority of spans.
+    expect(spanMessageParts([textPart(QUESTION)])).toEqual({});
+  });
+
+  it("does not turn a turn with no text into an empty string", () => {
+    // Upstream yields undefined here; a "" would read as an empty message instead.
+    expect(spanMessageParts([imagePart(STORED_URL)])).toEqual({
+      images: [{ image: { url: STORED_URL, mediaType: "image/png" } }],
+    });
+  });
+
+  it("carries text and images together, each in recorded order", () => {
+    expect(
+      spanMessageParts([
+        textPart(QUESTION),
+        imagePart(STORED_URL),
+        textPart(ANSWER),
+      ])
+    ).toEqual({
+      content: `${QUESTION}\n\n${ANSWER}`,
+      images: [{ image: { url: STORED_URL, mediaType: "image/png" } }],
+    });
+  });
+
+  it("ignores a part that claims text but carries none", () => {
+    expect(
+      spanMessageParts([
+        textPart(QUESTION),
+        { message_content: { type: "text" } },
+        textPart(ANSWER),
+      ])
+    ).toEqual({ content: `${QUESTION}\n\n${ANSWER}` });
+  });
+});
+
+describe("replaying the staging AI-marking span", () => {
+  it("keeps the student answer on the user turn", () => {
+    const { messages, messageParsingErrors } =
+      getTemplateMessagesFromAttributes({
+        provider: "GOOGLE",
+        parsedAttributes: {
+          llm: {
+            input_messages: [
+              { message: { role: "system", content: "You are a teacher." } },
+              {
+                message: {
+                  role: "user",
+                  contents: [
+                    {
+                      message_content: {
+                        type: "text",
+                        text: "# Question\n**Text:** What is AGI in AI",
+                      },
+                    },
+                    {
+                      message_content: {
+                        type: "text",
+                        text: "# Student Answer\n**Answer:** Artificial General Intelligence is…",
+                      },
+                    },
+                  ],
+                },
+              },
+            ],
+          },
+        },
+      });
+
+    expect(messageParsingErrors).toEqual([]);
+    expect(messages?.[1].content).toContain("# Question");
+    expect(messages?.[1].content).toContain("# Student Answer");
   });
 });
