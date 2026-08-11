@@ -53,6 +53,23 @@ upstream's test file. The fix is a fork-owned helper plus one import and same-li
 **`src/phoenix/server/api/helpers/playground_media/`** — a module per provider, with only
 a 1–3 line delegation left in upstream's `playground_clients.py`.
 
+**Import a fork module into an upstream one *relatively*.** An absolute
+`from phoenix.client.resources.media import ...` is sorted into upstream's first-party
+block — in `client.py` it lands between `experiments` and `projects`, which is exactly
+where upstream inserts its next resource, so both sides insert at the same position and
+conflict. `from .resources.media import ...` sorts into isort's local-folder section
+instead, which upstream (absolute imports throughout) never writes to: the fork's line
+ends up alone, blank-line separated, at the end of the import area — shape 1/2 rather
+than shape 2-at-the-worst-spot. It costs the separating blank line, so the line count is
+a wash; the exposure is not. `packages/phoenix-client/src/phoenix/client/client.py`,
+`resources/prompts/__init__.py` and `types/prompts.py` all do this. Do not "tidy" them
+back to absolute.
+
+**Insert into an upstream list at the end upstream does not append to.** The fork adds
+`"messages"` to `PromptVersion.__dir__`'s list. Appending it after upstream's last entry
+put it exactly where upstream's next entry goes; it sits at the *head* of the list
+instead. `dir()` sorts the result, so position costs nothing.
+
 ## Where fork code goes
 
 - provider media handling → `src/phoenix/server/api/helpers/playground_media/`
@@ -65,6 +82,11 @@ a 1–3 line delegation left in upstream's `playground_clients.py`.
 - prompt and trace rendering → `app/src/components/prompt/media/`,
   `app/src/pages/trace/span/media/`
 - fork-only make targets → `mk/fork.mk`
+- client resources for fork endpoints → `packages/phoenix-client/src/phoenix/client/resources/media/`
+- client methods upstream's resource classes lack → a module beside them exporting
+  mixins, e.g. `resources/prompts/management.py`; upstream's class then gains a base
+  class instead of a block of methods
+- public accessors on upstream client types → `packages/phoenix-client/src/phoenix/client/types/prompt_messages.py`
 - test helpers → a `__fixtures__/` directory beside the module they are about
 
 ## Tests
@@ -94,8 +116,12 @@ git diff --numstat upstream/main
 ```
 
 Lines in files upstream owns are the entire conflict surface; lines in fork-only files are
-free. Keep the ratio moving toward fork-only. Current: 30 upstream-owned files carrying
-+607/−108 hand-written lines, against ~12,400 in fork-only files.
+free. Keep the ratio moving toward fork-only. Current: 44 upstream-owned files carrying
++685/−119 hand-written lines, against ~19,800 in fork-only files.
+
+Measured against `git merge-base HEAD upstream/main`, excluding generated artifacts and
+lockfiles. `git diff --numstat upstream/main` overstates it once upstream has moved on
+past the last sync, since it then counts upstream's own changes as fork drift.
 
 ## See also
 

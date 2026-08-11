@@ -40,6 +40,8 @@ from phoenix.client.helpers.sdk.openai.chat import (
 )
 from phoenix.client.utils.template_formatters import TemplateFormatter
 
+from .prompt_messages import PromptMessagesMixin
+
 if TYPE_CHECKING:
     from anthropic.types import MessageParam
     from anthropic.types.message_create_params import MessageCreateParamsBase
@@ -48,7 +50,7 @@ if TYPE_CHECKING:
     from openai.types.chat.completion_create_params import CompletionCreateParamsBase
 
 
-class PromptVersion:
+class PromptVersion(PromptMessagesMixin):
     """
     Represents a version of a prompt for different model providers.
     """
@@ -210,6 +212,7 @@ class PromptVersion:
 
     def __dir__(self) -> list[str]:
         return [
+            "messages",
             "id",
             "format",
             "from_openai",

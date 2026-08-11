@@ -14,10 +14,12 @@ from phoenix.client.utils.server_requirements import (
     ServerVersionGuard,
 )
 
+from .management import AsyncPromptsManagementMixin, PromptsManagementMixin
+
 logger = logging.getLogger(__name__)
 
 
-class Prompts:
+class Prompts(PromptsManagementMixin):
     """Provides methods for interacting with prompt resources.
 
     This class allows you to retrieve and create prompt versions.
@@ -305,7 +307,7 @@ class PromptVersionTags:
         return list(cast(v1.GetPromptVersionTagsResponseBody, response.json())["data"])
 
 
-class AsyncPrompts:
+class AsyncPrompts(AsyncPromptsManagementMixin):
     """
     Provides asynchronous methods for interacting with prompt resources.
 

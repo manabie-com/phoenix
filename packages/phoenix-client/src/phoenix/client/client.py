@@ -14,10 +14,12 @@ from phoenix.client.resources.traces import AsyncTraces, Traces
 from phoenix.client.utils.config import get_base_url, get_env_client_headers
 from phoenix.client.utils.server_requirements import AsyncServerVersionGuard, ServerVersionGuard
 
+from .resources.media import AsyncMediaClientMixin, MediaClientMixin
+
 _DEFAULT_CLIENT_TIMEOUT = httpx.Timeout(connect=10.0, read=30.0, write=10.0, pool=10.0)
 
 
-class Client:
+class Client(MediaClientMixin):
     def __init__(
         self,
         *,
@@ -133,7 +135,7 @@ class Client:
         return self._experiments
 
 
-class AsyncClient:
+class AsyncClient(AsyncMediaClientMixin):
     def __init__(
         self,
         *,
