@@ -123,6 +123,7 @@ jobs:
           run gen-graphql         make graphql
           run gen-openapi         make openapi
           run gen-generative-ui   make schema-generative-ui
+          run gen-ui-reducer      make ui-message-stream-fixtures
           run python-format       make format-python
           run python-lint         make lint-python
           run python-typecheck    make typecheck-python
@@ -217,7 +218,7 @@ jobs:
       - name: Hand off to Claude (fix regressions)
         id: claude_fix
         if: steps.changes.outputs.changed == 'true' && steps.verify.outcome == 'failure'
-        uses: anthropics/claude-code-action@be7b93b1907a4abad570368f3c74b6fe3807510b # v1.0.183
+        uses: anthropics/claude-code-action@239e3a730883eeb5c53db12b0fc9573b3024b126 # v1.0.191
         env:
           CLAUDE_CODE_SUBPROCESS_ENV_SCRUB: "1"
         with:
@@ -264,6 +265,7 @@ jobs:
               - `.scratch/verify/gen-graphql.log`
               - `.scratch/verify/gen-openapi.log`
               - `.scratch/verify/gen-generative-ui.log`
+              - `.scratch/verify/gen-ui-reducer.log`
               - `.scratch/verify/python-format.log`
               - `.scratch/verify/python-lint.log`
               - `.scratch/verify/python-typecheck.log`

@@ -1,5 +1,86 @@
 # Changelog
 
+## [20.1.0](https://github.com/Arize-ai/phoenix/compare/arize-phoenix-v20.0.0...arize-phoenix-v20.1.0) (2026-08-12)
+
+
+### Features
+
+* **auth:** support JWT client assertion for OAuth2 login ([#15314](https://github.com/Arize-ai/phoenix/issues/15314)) ([3b277cf](https://github.com/Arize-ai/phoenix/commit/3b277cffaf6f4b5683e5fd1c24766e7ab6c6b974))
+* refine evaluation metric chart layout and controls ([#15356](https://github.com/Arize-ai/phoenix/issues/15356)) ([39740fa](https://github.com/Arize-ai/phoenix/commit/39740fa8bef58d391fbd5251850482a6307c3898))
+* **server:** add POST /traces/transfer ([#15363](https://github.com/Arize-ai/phoenix/issues/15363)) ([5c38cc7](https://github.com/Arize-ai/phoenix/commit/5c38cc7ff2398569da3bbb23aa9a384ad73a0134))
+
+
+### Bug Fixes
+
+* **agents:** prevent exported session ID collisions ([#15358](https://github.com/Arize-ai/phoenix/issues/15358)) ([4e828c3](https://github.com/Arize-ai/phoenix/commit/4e828c3c97d3515ff82dafec69dbf82b8b4e2695))
+* route OpenAI reasoning models to the Responses API client ([#15362](https://github.com/Arize-ai/phoenix/issues/15362)) ([2d44558](https://github.com/Arize-ai/phoenix/commit/2d44558e2ca13af66f3450cbd2f183944f927101))
+
+
+### Documentation
+
+* add v20.0.0 entry to MIGRATION.md ([#15346](https://github.com/Arize-ai/phoenix/issues/15346)) ([355ebea](https://github.com/Arize-ai/phoenix/commit/355ebeac186579d3aab4715b67e03593ae1544aa))
+
+## [20.0.0](https://github.com/Arize-ai/phoenix/compare/arize-phoenix-v19.21.0...arize-phoenix-v20.0.0) (2026-08-11)
+
+
+### ⚠ BREAKING CHANGES
+
+* agent session persistence ([#14143](https://github.com/Arize-ai/phoenix/issues/14143))
+* **client:** replace google-generativeai formatter with google-genai ([#15085](https://github.com/Arize-ai/phoenix/issues/15085))
+
+### Features
+
+* add semantic coloring to project metric tooltips ([#14936](https://github.com/Arize-ai/phoenix/issues/14936)) ([840f6cb](https://github.com/Arize-ai/phoenix/commit/840f6cbaf76bfee3dcbe8e41d34655be3c6254db))
+* agent session persistence ([#14143](https://github.com/Arize-ai/phoenix/issues/14143)) ([986f6a6](https://github.com/Arize-ai/phoenix/commit/986f6a6fdaeda70d83e2d91f150f9b01d9b8406f))
+* **client:** replace google-generativeai formatter with google-genai ([#15085](https://github.com/Arize-ai/phoenix/issues/15085)) ([5cf9829](https://github.com/Arize-ai/phoenix/commit/5cf9829c4398d784c004c9c976cd7b6739f2aa99))
+* **server:** support trace_annotations in the span filter DSL ([#14192](https://github.com/Arize-ai/phoenix/issues/14192)) ([e70415d](https://github.com/Arize-ai/phoenix/commit/e70415d7c3faa87c04f7fcc1259112a3a2f6738b))
+
+
+### Bug Fixes
+
+* add empty state for column selector ([#15166](https://github.com/Arize-ai/phoenix/issues/15166)) ([759bfd2](https://github.com/Arize-ai/phoenix/commit/759bfd2d18084879df213f2594e6b5414de77f87))
+* **deps:** update arize-phoenix-client to 3.0.0 ([#15311](https://github.com/Arize-ai/phoenix/issues/15311)) ([92c33ef](https://github.com/Arize-ai/phoenix/commit/92c33ef585b86b4fd6c4ba3d0c14aebb6cdae9e8))
+* open session trace on turn double click ([#14637](https://github.com/Arize-ai/phoenix/issues/14637)) ([41b92fd](https://github.com/Arize-ai/phoenix/commit/41b92fd0af211f42c8588383a371e3a13e8fb5c1))
+* **server:** classify Google errors and correct release version ([#15310](https://github.com/Arize-ai/phoenix/issues/15310)) ([c091306](https://github.com/Arize-ai/phoenix/commit/c091306348d8727fa0240abd84be7674a6a18a46))
+
+
+### Miscellaneous Chores
+
+* release 20.0.0 ([#15342](https://github.com/Arize-ai/phoenix/issues/15342)) ([65c4462](https://github.com/Arize-ai/phoenix/commit/65c44623e12999f19fefd50bc15fccf67c888afe))
+
+## [19.21.0](https://github.com/Arize-ai/phoenix/compare/arize-phoenix-v19.20.0...arize-phoenix-v19.21.0) (2026-08-10)
+
+
+### Features
+
+* **api:** add REST endpoints for setting tags on experiments ([#15237](https://github.com/Arize-ai/phoenix/issues/15237)) ([c892873](https://github.com/Arize-ai/phoenix/commit/c8928738d8a9cd70875e01852306de7060febf5d))
+* **sessions:** AI query for the session filter ([#15090](https://github.com/Arize-ai/phoenix/issues/15090)) ([6e3e7cf](https://github.com/Arize-ai/phoenix/commit/6e3e7cf735dffa4f6a83b9087afef09d0415121f))
+
+
+### Bug Fixes
+
+* **deps:** cap vercel below 0.8 ([#15278](https://github.com/Arize-ai/phoenix/issues/15278)) ([7b1860a](https://github.com/Arize-ai/phoenix/commit/7b1860ab579351ab978332ca04a2b8e958d5654a))
+* **deps:** update arize-phoenix-evals to 3.4.0 ([#15232](https://github.com/Arize-ai/phoenix/issues/15232)) ([e270d20](https://github.com/Arize-ai/phoenix/commit/e270d20dd661045c171c3aab3215e1ab98c4b7eb))
+* **mcp:** contain malformed Monty error payloads ([#15244](https://github.com/Arize-ai/phoenix/issues/15244)) ([d88ca00](https://github.com/Arize-ai/phoenix/commit/d88ca008d41146d4f109589bda0d60d437ec0f1c))
+* **trace:** cast the object-typed parameters fixture to satisfy tsc ([1f7cc4b](https://github.com/Arize-ai/phoenix/commit/1f7cc4b6576645c1c779c1a9de11f3a4ab2da75a))
+* **trace:** coerce object json_schema in getLLMAttributes toolSchemas ([f7e2515](https://github.com/Arize-ai/phoenix/commit/f7e2515ad3f9d3866e02a0a2144de9346331b403))
+* **trace:** stringify tool attributes rebuilt as objects ([#14984](https://github.com/Arize-ai/phoenix/issues/14984)) ([4b4dad5](https://github.com/Arize-ai/phoenix/commit/4b4dad5f031b15ef74261d79f83a89169f17bcc3))
+* **ui:** debounce responsive chart resizing ([#15257](https://github.com/Arize-ai/phoenix/issues/15257)) ([2c5c49d](https://github.com/Arize-ai/phoenix/commit/2c5c49d38a580eef95c6b02307cd39a21e92b09f))
+
+## [19.20.0](https://github.com/Arize-ai/phoenix/compare/arize-phoenix-v19.19.1...arize-phoenix-v19.20.0) (2026-08-10)
+
+
+### Features
+
+* add copy actions to session turns ([#14811](https://github.com/Arize-ai/phoenix/issues/14811)) ([b9999ae](https://github.com/Arize-ai/phoenix/commit/b9999ae4745e8f33eb7f512663bf7df56338da23))
+* **server:** add dataset split create/update/delete REST endpoints ([#14046](https://github.com/Arize-ai/phoenix/issues/14046)) ([b4d9b19](https://github.com/Arize-ai/phoenix/commit/b4d9b19e6c681cedcf627fc27dc48f13c7320b73))
+
+
+### Bug Fixes
+
+* **app:** unblock project navigation during loader fetches ([#14967](https://github.com/Arize-ai/phoenix/issues/14967)) ([e11b1c3](https://github.com/Arize-ai/phoenix/commit/e11b1c359327058d00784ff2f7c908601024dde0))
+* **deps:** update arize-phoenix-otel to 0.17.0 ([f413867](https://github.com/Arize-ai/phoenix/commit/f41386742d29fcf2a6ed4ead0c15787d65b5153f))
+
 ## [19.19.1](https://github.com/Arize-ai/phoenix/compare/arize-phoenix-v19.19.0...arize-phoenix-v19.19.1) (2026-08-08)
 
 
