@@ -38,9 +38,9 @@ from phoenix.server.api.helpers.message_media import (
     resolve_message_media,
 )
 from phoenix.server.api.helpers.playground_clients import (
-    AnthropicStreamingClient,
-    BedrockStreamingClient,
-    GoogleStreamingClient,
+    AnthropicClient,
+    BedrockClient,
+    GoogleClient,
     llm_input_messages,
 )
 from phoenix.server.api.helpers.playground_media import google_parts
@@ -102,7 +102,7 @@ def _dummy_factory(name: str) -> Any:
 
 
 def _google_client() -> Any:
-    return GoogleStreamingClient(
+    return GoogleClient(
         client_factory=_dummy_factory("google"),
         model_name="gemini-2.5-flash",
         provider="google",
@@ -613,9 +613,9 @@ class TestDocumentVariablesAreDescribedAsDocuments:
 
 
 def _openai_client() -> Any:
-    from phoenix.server.api.helpers.playground_clients import OpenAIStreamingClient
+    from phoenix.server.api.helpers.playground_clients import OpenAIChatCompletionsClient
 
-    return OpenAIStreamingClient(
+    return OpenAIChatCompletionsClient(
         client_factory=_dummy_factory("openai"),
         model_name="gpt-4o",
         provider="openai",
@@ -624,10 +624,10 @@ def _openai_client() -> Any:
 
 def _responses_client() -> Any:
     from phoenix.server.api.helpers.playground_clients import (
-        OpenAIResponsesAPIStreamingClient,
+        OpenAIResponsesClient,
     )
 
-    return OpenAIResponsesAPIStreamingClient(
+    return OpenAIResponsesClient(
         client_factory=_dummy_factory("openai"),
         model_name="gpt-4o",
         provider="openai",
@@ -635,7 +635,7 @@ def _responses_client() -> Any:
 
 
 def _anthropic_client() -> Any:
-    return AnthropicStreamingClient(
+    return AnthropicClient(
         client_factory=_dummy_factory("anthropic"),
         model_name="claude-3-5-sonnet-latest",
         provider="anthropic",
@@ -643,7 +643,7 @@ def _anthropic_client() -> Any:
 
 
 def _bedrock_client() -> Any:
-    return BedrockStreamingClient(
+    return BedrockClient(
         client_factory=_dummy_factory("aws"),
         model_name="anthropic.claude-3-5-sonnet-20240620-v1:0",
         provider="aws",

@@ -152,6 +152,30 @@ it does, decide which kind of document it is:
    `SpanDetails` fix once caused 100% of a sync's conflicts, on a bug upstream had already
    fixed more cleanly seventeen hours earlier.
 
+## Label the sync PR `upstream-sync`
+
+Do this as soon as the PR exists. Without it the **OpenAPI Schema Backward
+Compatibility** check fails on any sync where upstream retired an endpoint, and the
+failure is neither actionable nor a fork defect — the check compares the PR base
+against its head, so it reports upstream's own breaking changes as if the fork had
+made them.
+
+The August 2026 sync is the worked example: upstream replaced
+`/agents/{agent_id}/sessions/{session_id}/chat` and `.../summary` with
+`/v1/agent_sessions/*`. Both routes were defined in
+`src/phoenix/server/api/routers/agents.py` at the merge-base, so they were upstream's
+all along, and no fork code called either one.
+
+`.github/workflows/openapi-schema.yaml` carries a one-line `if:` that skips the job
+when this label is present. That is a fork line in an upstream-owned file, kept to a
+single insertion with no comment precisely to hold the footprint at one line — this
+section is the comment. Do not widen the condition to a branch prefix like `claude/*`:
+that would disable the gate for every Claude-authored PR, including one that really
+does break the fork's own API.
+
+The label does not re-trigger the workflow, so add it before pushing, or re-run the
+check afterwards.
+
 ## Running the Playwright suite against a sync
 
 Worth doing after a sync, because it is the only layer that exercises real Relay data in a
