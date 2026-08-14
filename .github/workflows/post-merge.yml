@@ -31,13 +31,23 @@ concurrency:
 
 env:
   UV_VERSION: "0.11.31"
-  # fake openai key so that llama_index doesn't download huggingface embeddings
-  OPENAI_API_KEY: "sk-fake-openai-key"
 
 jobs:
   python-unit-tests:
     name: Python Unit Tests (${{ matrix.db }})
     runs-on: ubuntu-latest
+    env:
+      # Fake key so that llama_index doesn't download huggingface embeddings.
+      #
+      # Scoped to this job on purpose. At workflow level the Playwright job
+      # inherited it too, and a key -- even a fake one -- makes the server report
+      # OpenAI as provisioned. The playground model picker then switches from
+      # "show the flagship providers" to "show only ready providers"
+      # (useModelMenuData.ts, visibleProviders), which drops Anthropic and Google
+      # from the menu entirely and hung two specs on a locator that could never
+      # resolve. Upstream's playwright.yaml sets no API keys at all, which is why
+      # the same specs pass there. Reproduced locally both ways before moving it.
+      OPENAI_API_KEY: "sk-fake-openai-key"
     strategy:
       fail-fast: false
       matrix:
@@ -73,17 +83,63 @@ jobs:
       # So the suite is not starved of workers here -- it is memory-bound, and
       # oversubscribing only gets the runner VM reclaimed. Keep `-n auto` and buy
       # time with the timeout instead. Raise workers only with evidence.
+      #
+      # The PostgreSQL leg is NOT merely slow, and raising its timeout alone will
+      # not make it pass. All 13 runs of this workflow are red; of the 5 opened,
+      # PostgreSQL failed and SQLite passed every time, always the same way:
+      # steady progress, then total silence until the step is killed. Measured on
+      # run 31469235339 -- no gap between progress lines exceeded 100s all the way
+      # to 99% at +53min, then 36 minutes of nothing. `-n auto` resolves to 2
+      # workers here, not the 4 assumed above.
+      #
+      # The stall point is random across runs (32%, 40%, 73%, 99%) because
+      # pytest-randomly reshuffles order each time, so it is one specific test
+      # hanging rather than the suite being too slow. SQLite passes every run.
+      # The `--timeout` below exists to name that test; until a run carries its
+      # failure, the culprit is unidentified.
       - name: Run unit tests (SQLite)
         if: matrix.db == 'sqlite'
-        timeout-minutes: 90
+        timeout-minutes: 120
         run: uvx tox run -e unit_tests -- -ra --reruns 5 -n auto --dist loadscope
+      # A hung test has to be turned into a named failure, or the leg just burns
+      # its timeout and reports nothing (see the note above). pytest-timeout does
+      # that; core pytest's `faulthandler_timeout` does not, because under xdist
+      # the worker's dump never reaches the job log -- verified, it produces no
+      # output at all with `-n 2`.
+      #
+      # It is not in upstream's requirements files, and putting it there would
+      # add fork lines to an upstream-owned file for no reason. So build the env
+      # first and install into it: tox reuses the env on the next `run`, and the
+      # `uv pip install --strict` in its commands_pre only validates consistency,
+      # it does not prune extras.
+      - name: Build unit-test environment
+        if: matrix.db == 'postgresql'
+        run: uvx tox run -e unit_tests --notest
+      - name: Add pytest-timeout to the unit-test environment
+        if: matrix.db == 'postgresql'
+        run: uv pip install --python .tox/unit_tests/bin/python pytest-timeout
+      # 600s is far above any legitimate test here -- the suite's progress is
+      # smooth, with no gap between progress lines over 100s -- so this fires
+      # only on a genuine hang, and the run continues past it instead of dying.
       - name: Run unit tests (PostgreSQL)
         if: matrix.db == 'postgresql'
-        timeout-minutes: 90
+        timeout-minutes: 120
         run: >-
           uvx tox run -e unit_tests --
           -ra --reruns 5 --db postgresql -n auto --dist loadscope
+          --timeout=600
           --postgresql-exec /usr/lib/postgresql/14/bin/pg_ctl
+      # Runs even when the step above is killed by its timeout. Disk is the
+      # leading suspect: every test clones a fresh database from the template
+      # via CREATE DATABASE ... TEMPLATE, and a hosted runner has ~14 GB free.
+      # If the janitor falls behind, PostgreSQL blocks on writes and the suite
+      # stops dead with no error -- exactly the observed shape.
+      - name: Resource snapshot
+        if: always() && matrix.db == 'postgresql'
+        run: |
+          echo "=== disk ==="; df -h
+          echo "=== memory ==="; free -m
+          echo "=== postgres processes ==="; ps aux | grep -c '[p]ostgres' || true
 
   e2e-tests:
     name: Playwright E2E
