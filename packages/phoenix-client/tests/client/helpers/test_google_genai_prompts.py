@@ -81,6 +81,22 @@ def parts_of(prompt: Any) -> list[tuple[str, Any]]:
     return out
 
 
+def inline_of(prompt: Any, *, content: int = 0, part: int = 0) -> Any:
+    """The `Blob` on one converted part, with google.genai's Optionals asserted away.
+
+    `Content.parts` and `Part.inline_data` are both `Optional` upstream, so the
+    chained access a test wants to write is a type error under strict mode.
+    Asserting once here keeps that noise out of every assertion, and a None
+    anywhere in the chain fails the test loudly instead of raising an opaque
+    `TypeError`.
+    """
+    parts = prompt.contents[content].parts
+    assert parts is not None, "converted content carries no parts"
+    blob = parts[part].inline_data
+    assert blob is not None, "converted part carries no inline_data"
+    return blob
+
+
 @pytest.fixture
 def png_file(tmp_path: Path) -> Path:
     path = tmp_path / "cat.png"
@@ -169,7 +185,7 @@ class TestImageParts:
             [{"role": "user", "content": [{"type": "image", "image": {"variable": "i"}}]}]
         )
         result = to_genai(prompt, variables={"i": png_file})
-        assert result.contents[0].parts[0].inline_data.data == PNG_BYTES
+        assert inline_of(result).data == PNG_BYTES
 
     def test_nothing_is_reported_unsupported(self, png_file: Path) -> None:
         prompt = make_prompt([{"role": "user", "content": TEXT_AND_IMAGE_VARIABLE}])
@@ -201,25 +217,25 @@ class TestBase64Media:
         b64 = base64.b64encode(PNG_BYTES).decode()
         prompt = make_prompt([{"role": "user", "content": self.IMAGE_VAR_ONLY}])
         result = to_genai(prompt, variables={"image": make_value(b64)})
-        inline = result.contents[0].parts[0].inline_data
+        inline = inline_of(result)
         assert inline.mime_type == "image/png"
         assert inline.data == PNG_BYTES
 
     def test_raw_bytes_are_not_mistaken_for_base64(self) -> None:
         prompt = make_prompt([{"role": "user", "content": self.IMAGE_VAR_ONLY}])
         result = to_genai(prompt, variables={"image": PNG_BYTES})
-        assert result.contents[0].parts[0].inline_data.data == PNG_BYTES
+        assert inline_of(result).data == PNG_BYTES
 
     def test_bytearray_is_accepted(self) -> None:
         prompt = make_prompt([{"role": "user", "content": self.IMAGE_VAR_ONLY}])
         result = to_genai(prompt, variables={"image": bytearray(PNG_BYTES)})
-        assert result.contents[0].parts[0].inline_data.data == PNG_BYTES
+        assert inline_of(result).data == PNG_BYTES
 
     def test_jpeg_signature_is_detected(self) -> None:
         jpeg = b"\xff\xd8\xff" + b"\x00" * 40
         prompt = make_prompt([{"role": "user", "content": self.IMAGE_VAR_ONLY}])
         result = to_genai(prompt, variables={"image": jpeg})
-        assert result.contents[0].parts[0].inline_data.mime_type == "image/jpeg"
+        assert inline_of(result).mime_type == "image/jpeg"
 
     @pytest.mark.parametrize(
         "not_an_image",
@@ -294,7 +310,7 @@ class TestPhoenixHostedMedia:
         )
         result = to_genai(prompt, client=self._client(f"/v1/media/{sha}"))
         assert parts_of(result) == [("image", "image/png")]
-        assert result.contents[0].parts[0].inline_data.data == PNG_BYTES
+        assert inline_of(result).data == PNG_BYTES
 
     def test_stored_media_and_runtime_variable_coexist(self) -> None:
         # The shape a few-shot prompt takes: a fixed example image plus the
@@ -404,14 +420,14 @@ class TestFileParts:
     def test_file_bytes_are_preserved_exactly(self) -> None:
         prompt = make_prompt([{"role": "user", "content": self.FILE_VAR}])
         result = to_genai(prompt, variables={"contract_pdf": self.PDF_BYTES})
-        assert result.contents[0].parts[1].inline_data.data == self.PDF_BYTES
+        assert inline_of(result, part=1).data == self.PDF_BYTES
 
     def test_file_from_path(self, tmp_path: Path) -> None:
         pdf = tmp_path / "contract.pdf"
         pdf.write_bytes(self.PDF_BYTES)
         prompt = make_prompt([{"role": "user", "content": self.FILE_VAR}])
         result = to_genai(prompt, variables={"contract_pdf": pdf})
-        assert result.contents[0].parts[1].inline_data.mime_type == "application/pdf"
+        assert inline_of(result, part=1).mime_type == "application/pdf"
 
     def test_stored_file_literal(self) -> None:
         uri = "data:application/pdf;base64," + base64.b64encode(self.PDF_BYTES).decode()
