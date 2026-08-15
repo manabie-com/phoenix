@@ -57,7 +57,7 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  UV_VERSION: "0.11.31"
+  UV_VERSION: "0.12.1"
   # fake openai key so that llama_index doesn't download huggingface embeddings
   OPENAI_API_KEY: "sk-fake-openai-key"
 
@@ -107,7 +107,7 @@ jobs:
               - "tox.ini"
               - "uv.lock"
             app:
-              - "app/**"
+              - "js/app/**"
               - "schemas/openapi.json"
               - "src/phoenix/server/generative_ui/**"
               - ".oxlintrc.json"
@@ -126,7 +126,7 @@ jobs:
               - "src/phoenix/db/migrations/**"
               - "src/phoenix/db/models.py"
             e2e:
-              - "app/**"
+              - "js/app/**"
               - "src/phoenix/**"
               - "pyproject.toml"
               - "uv.lock"
@@ -237,32 +237,32 @@ jobs:
       - name: Install PNPM
         uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v5.0.0
         with:
-          package_json_file: app/package.json
+          package_json_file: js/package.json
       - name: Use Node.js
         uses: actions/setup-node@53b83947a5a98c8d113130e565377fae1a50d02f # v6.3.0
         with:
-          cache-dependency-path: ./app/pnpm-lock.yaml
+          cache-dependency-path: ./js/pnpm-lock.yaml
           node-version-file: .nvmrc
           cache: "pnpm"
       - name: Install dependencies
-        working-directory: ./app
+        working-directory: ./js/app
         run: pnpm install --frozen-lockfile
       - name: Type Check
-        working-directory: ./app
+        working-directory: ./js/app
         run: pnpm run typecheck
       - name: Formatting
-        working-directory: ./app
+        working-directory: ./js/app
         run: pnpm run fmt:check
       - name: Lint
-        working-directory: ./app
+        working-directory: ./js/app
         run: pnpm run lint
       - name: Relay Codegen
-        working-directory: ./app
+        working-directory: ./js/app
         run: |
           pnpm run build:relay
           git diff --exit-code
       - name: OpenAPI Codegen
-        working-directory: ./app
+        working-directory: ./js/app
         run: |
           pnpm run generate:openapi
           git diff --exit-code
@@ -271,7 +271,7 @@ jobs:
           make schema-generative-ui
           git diff --exit-code
       - name: Test
-        working-directory: ./app
+        working-directory: ./js/app
         run: pnpm run test
 
   typescript-packages:
@@ -543,27 +543,28 @@ jobs:
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           persist-credentials: false
-      # app/ and js/ must agree on the toolchain, or `pnpm lint` / `fmt:check`
-      # disagree between the two workspaces and CI contradicts local runs.
-      - name: Check pinned tool versions match between app/ and js/
+      # js/app/ and js/ must agree on the toolchain, or `pnpm lint` / `fmt:check`
+      # disagree between the two and CI contradicts local runs. The pnpm version
+      # itself is centralized on js/package.json's `packageManager` since the app
+      # moved into the js/ workspace, so there's nothing to compare there anymore.
+      - name: Check pinned tool versions match between js/app/ and js/
         run: |
           fail=0
           check() {
             local label="$1" query="$2"
             local a b
-            a=$(jq -r "$query // empty" app/package.json)
+            a=$(jq -r "$query // empty" js/app/package.json)
             b=$(jq -r "$query // empty" js/package.json)
             if [ -z "$a" ] || [ -z "$b" ]; then
-              echo "::error::$label missing from app/package.json or js/package.json"
+              echo "::error::$label missing from js/app/package.json or js/package.json"
               fail=1
             elif [ "$a" != "$b" ]; then
-              echo "::error::$label mismatch: app=$a js=$b"
+              echo "::error::$label mismatch: js/app=$a js=$b"
               fail=1
             else
               echo "$label consistent: $a"
             fi
           }
-          check "pnpm"             '.packageManager'
           check "oxlint"           '.devDependencies.oxlint'
           check "oxlint-tsgolint"  '.devDependencies["oxlint-tsgolint"]'
           check "oxfmt"            '.devDependencies.oxfmt'
