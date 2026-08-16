@@ -247,6 +247,12 @@ jobs:
       - name: Install dependencies
         working-directory: ./js/app
         run: pnpm install --frozen-lockfile
+      # The app imports @arizeai/phoenix-client and @arizeai/phoenix-evals from
+      # source; both are workspace packages that ship compiled dist/ output,
+      # so typecheck fails on missing type declarations until they're built.
+      - name: Build workspace dependencies
+        working-directory: ./js/app
+        run: pnpm run build:deps
       - name: Type Check
         working-directory: ./js/app
         run: pnpm run typecheck
