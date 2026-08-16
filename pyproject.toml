@@ -48,6 +48,7 @@ dependencies = [
   "openinference-semantic-conventions>=0.1.26",
   "openinference-instrumentation>=0.1.44",
   "openinference-instrumentation-openai>=0.1.41",
+  "sqlglot==30.15.0",
   "sqlalchemy[asyncio]>=2.0.46, <3",
   "alembic>=1.3.0, <2",
   "aiosqlite>=0.22.1",
@@ -435,7 +436,7 @@ line-ending = "native"
 script_location = "src/phoenix/db/migrations"  # enables `uv run alembic <command>`
 
 [tool.uv]
-required-version = "==0.11.31"  # When updating this version, also update the `backend-builder` image in the Dockerfile
+required-version = "==0.12.1"  # When updating this version, also update ARG UV_IMAGE in the Dockerfile
 exclude-newer = "3 days"
 # Exempt our own packages from the `exclude-newer` window so freshly published
 # versions are immediately resolvable. arize-phoenix-sqlean is not a workspace
