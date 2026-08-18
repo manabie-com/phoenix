@@ -57,7 +57,7 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  UV_VERSION: "0.11.31"
+  UV_VERSION: "0.12.1"
   # fake openai key so that llama_index doesn't download huggingface embeddings
   OPENAI_API_KEY: "sk-fake-openai-key"
 
@@ -107,7 +107,7 @@ jobs:
               - "tox.ini"
               - "uv.lock"
             app:
-              - "app/**"
+              - "js/app/**"
               - "schemas/openapi.json"
               - "src/phoenix/server/generative_ui/**"
               - ".oxlintrc.json"
@@ -126,7 +126,7 @@ jobs:
               - "src/phoenix/db/migrations/**"
               - "src/phoenix/db/models.py"
             e2e:
-              - "app/**"
+              - "js/app/**"
               - "src/phoenix/**"
               - "pyproject.toml"
               - "uv.lock"
@@ -224,61 +224,15 @@ jobs:
       - name: Fail if any generated artifact is stale
         run: git diff --exit-code
 
-  typescript-app:
-    name: Frontend Lint, Type Check & Tests
-    runs-on: ubuntu-latest
-    needs: changes
-    if: ${{ needs.changes.outputs.approved == 'true' && needs.changes.outputs.app == 'true' }}
-    steps:
-      - name: Checkout Repository
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-        with:
-          persist-credentials: false
-      - name: Install PNPM
-        uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v5.0.0
-        with:
-          package_json_file: app/package.json
-      - name: Use Node.js
-        uses: actions/setup-node@53b83947a5a98c8d113130e565377fae1a50d02f # v6.3.0
-        with:
-          cache-dependency-path: ./app/pnpm-lock.yaml
-          node-version-file: .nvmrc
-          cache: "pnpm"
-      - name: Install dependencies
-        working-directory: ./app
-        run: pnpm install --frozen-lockfile
-      - name: Type Check
-        working-directory: ./app
-        run: pnpm run typecheck
-      - name: Formatting
-        working-directory: ./app
-        run: pnpm run fmt:check
-      - name: Lint
-        working-directory: ./app
-        run: pnpm run lint
-      - name: Relay Codegen
-        working-directory: ./app
-        run: |
-          pnpm run build:relay
-          git diff --exit-code
-      - name: OpenAPI Codegen
-        working-directory: ./app
-        run: |
-          pnpm run generate:openapi
-          git diff --exit-code
-      - name: Generative UI Schema Codegen
-        run: |
-          make schema-generative-ui
-          git diff --exit-code
-      - name: Test
-        working-directory: ./app
-        run: pnpm run test
-
+  # app/ merged into the js/ pnpm workspace upstream (#15394): a single
+  # install/build/typecheck/lint/test at ./js already covers js/app, so the
+  # former standalone "typescript-app" job is folded in here rather than
+  # kept as a second, now-redundant workspace install.
   typescript-packages:
     name: JS Packages Lint, Type Check & Tests
     runs-on: ubuntu-latest
     needs: changes
-    if: ${{ needs.changes.outputs.approved == 'true' && needs.changes.outputs.packages == 'true' }}
+    if: ${{ needs.changes.outputs.approved == 'true' && (needs.changes.outputs.app == 'true' || needs.changes.outputs.packages == 'true') }}
     steps:
       - name: Checkout Repository
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -299,7 +253,9 @@ jobs:
         run: pnpm install --frozen-lockfile -r
       - name: Build
         working-directory: ./js
-        run: pnpm run -r build
+        run: |
+          pnpm run -r build
+          git diff --exit-code
       - name: Formatting
         working-directory: ./js
         run: pnpm run fmt:check
@@ -309,6 +265,19 @@ jobs:
       - name: Linting
         working-directory: ./js
         run: pnpm run lint
+      - name: OpenAPI Codegen
+        working-directory: ./js/app
+        run: |
+          pnpm run generate:openapi
+          git diff --exit-code
+      - name: Generative UI Schema Codegen
+        run: |
+          make schema-generative-ui
+          git diff --exit-code
+      - name: UI Message Stream Fixture Codegen
+        run: |
+          make ui-message-stream-fixtures
+          git diff --exit-code
       - name: Test
         working-directory: ./js
         run: pnpm run -r test
@@ -543,18 +512,18 @@ jobs:
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           persist-credentials: false
-      # app/ and js/ must agree on the toolchain, or `pnpm lint` / `fmt:check`
+      # js/app/ and js/ must agree on the toolchain, or `pnpm lint` / `fmt:check`
       # disagree between the two workspaces and CI contradicts local runs.
-      - name: Check pinned tool versions match between app/ and js/
+      - name: Check pinned tool versions match between js/app/ and js/
         run: |
           fail=0
           check() {
             local label="$1" query="$2"
             local a b
-            a=$(jq -r "$query // empty" app/package.json)
+            a=$(jq -r "$query // empty" js/app/package.json)
             b=$(jq -r "$query // empty" js/package.json)
             if [ -z "$a" ] || [ -z "$b" ]; then
-              echo "::error::$label missing from app/package.json or js/package.json"
+              echo "::error::$label missing from js/app/package.json or js/package.json"
               fail=1
             elif [ "$a" != "$b" ]; then
               echo "::error::$label mismatch: app=$a js=$b"
@@ -563,7 +532,6 @@ jobs:
               echo "$label consistent: $a"
             fi
           }
-          check "pnpm"             '.packageManager'
           check "oxlint"           '.devDependencies.oxlint'
           check "oxlint-tsgolint"  '.devDependencies["oxlint-tsgolint"]'
           check "oxfmt"            '.devDependencies.oxfmt'
