@@ -6,6 +6,16 @@ name: Pre-merge
 # The final `Pre-merge` job is the single required status check on `main`:
 # it fails while the label is missing, and fails if any gated job failed.
 #
+# Once approved, every job runs -- there is no per-path filtering. An earlier
+# version filtered with dorny/paths-filter, which on `pull_request` reads the
+# changed-file list from GitHub's API. That API is hard-capped at 3000 files and
+# returns them sorted by path, so a fork sync (PR #28: 3180 files) silently lost
+# the tail of the alphabet -- `src/`, `tests/`, `packages/`, `pyproject.toml`,
+# `uv.lock` -- and every Python job skipped while the gate reported green, on
+# exactly the PRs carrying the most upstream Python change. Since the label
+# already makes running the suite a deliberate act, the filter bought little and
+# failed open. Running everything cannot skip silently.
+#
 # This file is fork-local and has no upstream counterpart, so it should not
 # conflict when syncing with Arize-ai/phoenix.
 #
@@ -62,20 +72,11 @@ env:
   OPENAI_API_KEY: "sk-fake-openai-key"
 
 jobs:
-  changes:
+  gate:
     name: Gate
     runs-on: ubuntu-latest
     outputs:
       approved: ${{ steps.label.outputs.approved }}
-      python: ${{ steps.filter.outputs.python }}
-      app: ${{ steps.filter.outputs.app }}
-      packages: ${{ steps.filter.outputs.packages }}
-      py_packages: ${{ steps.filter.outputs.py_packages }}
-      migrations: ${{ steps.filter.outputs.migrations }}
-      e2e: ${{ steps.filter.outputs.e2e }}
-      helm: ${{ steps.filter.outputs.helm }}
-      openapi: ${{ steps.filter.outputs.openapi }}
-      workflows: ${{ steps.filter.outputs.workflows }}
     steps:
       - name: Check for the "Ok to test" label
         id: label
@@ -89,63 +90,16 @@ jobs:
             echo "approved=false" >> "$GITHUB_OUTPUT"
             echo "::warning::\"Ok to test\" label missing - pre-merge checks will not run."
           fi
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-        if: steps.label.outputs.approved == 'true'
-        with:
-          persist-credentials: false
-      - uses: dorny/paths-filter@fbd0ab8f3e69293af611ebaee6363fc25e6d187d # v4.0.1
-        if: steps.label.outputs.approved == 'true'
-        id: filter
-        with:
-          filters: |
-            python:
-              - "src/**"
-              - "tests/**"
-              - "evals/**"
-              - "packages/**"
-              - "pyproject.toml"
-              - "tox.ini"
-              - "uv.lock"
-            app:
-              - "js/app/**"
-              - "schemas/openapi.json"
-              - "src/phoenix/server/generative_ui/**"
-              - ".oxlintrc.json"
-              - ".oxfmtrc.jsonc"
-              - ".nvmrc"
-            packages:
-              - "js/**"
-              - "schemas/**"
-              - ".oxlintrc.json"
-              - ".oxfmtrc.jsonc"
-              - ".nvmrc"
-            py_packages:
-              - "packages/**"
-              - "uv.lock"
-            migrations:
-              - "src/phoenix/db/migrations/**"
-              - "src/phoenix/db/models.py"
-            e2e:
-              - "js/app/**"
-              - "src/phoenix/**"
-              - "pyproject.toml"
-              - "uv.lock"
-            helm:
-              - "helm/**"
-            openapi:
-              - "schemas/openapi.json"
-            workflows:
-              - ".github/workflows/**"
 
   python-lint:
     name: Python Format & Lint
     runs-on: ubuntu-latest
-    needs: changes
+    needs: gate
     # Deliberately NOT path-filtered. `ruff format` / `ruff check --fix` run
     # repo-wide, so this is the one job that catches drift anywhere in the tree
     # - including drift a PR did not introduce. Without it, a PR touching only
     # workflows or docs would get a green `Pre-merge` having checked nothing.
-    if: ${{ needs.changes.outputs.approved == 'true' }}
+    if: ${{ needs.gate.outputs.approved == 'true' }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -169,8 +123,8 @@ jobs:
   python-typecheck:
     name: Python Type Check (${{ matrix.py }})
     runs-on: ubuntu-latest
-    needs: changes
-    if: ${{ needs.changes.outputs.approved == 'true' && needs.changes.outputs.python == 'true' }}
+    needs: gate
+    if: ${{ needs.gate.outputs.approved == 'true' }}
     strategy:
       fail-fast: false
       matrix:
@@ -198,8 +152,8 @@ jobs:
   python-schemas:
     name: Python Schema & Codegen Drift
     runs-on: ubuntu-latest
-    needs: changes
-    if: ${{ needs.changes.outputs.approved == 'true' && needs.changes.outputs.python == 'true' }}
+    needs: gate
+    if: ${{ needs.gate.outputs.approved == 'true' }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -231,8 +185,8 @@ jobs:
   typescript-packages:
     name: JS Packages Lint, Type Check & Tests
     runs-on: ubuntu-latest
-    needs: changes
-    if: ${{ needs.changes.outputs.approved == 'true' && (needs.changes.outputs.app == 'true' || needs.changes.outputs.packages == 'true') }}
+    needs: gate
+    if: ${{ needs.gate.outputs.approved == 'true' }}
     steps:
       - name: Checkout Repository
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -285,8 +239,8 @@ jobs:
   python-doctests:
     name: Python Doctests
     runs-on: ubuntu-latest
-    needs: changes
-    if: ${{ needs.changes.outputs.approved == 'true' && needs.changes.outputs.python == 'true' }}
+    needs: gate
+    if: ${{ needs.gate.outputs.approved == 'true' }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -306,8 +260,8 @@ jobs:
   python-integration-tests:
     name: Python Integration Tests (${{ matrix.db }})
     runs-on: ubuntu-latest
-    needs: changes
-    if: ${{ needs.changes.outputs.approved == 'true' && needs.changes.outputs.python == 'true' }}
+    needs: gate
+    if: ${{ needs.gate.outputs.approved == 'true' }}
     strategy:
       fail-fast: false
       matrix:
@@ -359,8 +313,8 @@ jobs:
   python-migrations:
     name: DB Migration Continuity (${{ matrix.db }}${{ matrix.concurrently && ', concurrently' || '' }})
     runs-on: ubuntu-latest
-    needs: changes
-    if: ${{ needs.changes.outputs.approved == 'true' && needs.changes.outputs.migrations == 'true' }}
+    needs: gate
+    if: ${{ needs.gate.outputs.approved == 'true' }}
     strategy:
       fail-fast: false
       matrix:
@@ -440,8 +394,8 @@ jobs:
   python-packages:
     name: Python Package (${{ matrix.pkg }})
     runs-on: ubuntu-latest
-    needs: changes
-    if: ${{ needs.changes.outputs.approved == 'true' && needs.changes.outputs.py_packages == 'true' }}
+    needs: gate
+    if: ${{ needs.gate.outputs.approved == 'true' }}
     strategy:
       fail-fast: false
       matrix:
@@ -465,8 +419,8 @@ jobs:
   helm-tests:
     name: Helm Chart Tests
     runs-on: ubuntu-latest
-    needs: changes
-    if: ${{ needs.changes.outputs.approved == 'true' && needs.changes.outputs.helm == 'true' }}
+    needs: gate
+    if: ${{ needs.gate.outputs.approved == 'true' }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -488,8 +442,8 @@ jobs:
   actions-security:
     name: Actions Security (zizmor)
     runs-on: ubuntu-latest
-    needs: changes
-    if: ${{ needs.changes.outputs.approved == 'true' && needs.changes.outputs.workflows == 'true' }}
+    needs: gate
+    if: ${{ needs.gate.outputs.approved == 'true' }}
     permissions:
       security-events: write
       contents: read
@@ -505,8 +459,8 @@ jobs:
   package-versions:
     name: Package Version Consistency
     runs-on: ubuntu-latest
-    needs: changes
-    if: ${{ needs.changes.outputs.approved == 'true' && (needs.changes.outputs.app == 'true' || needs.changes.outputs.packages == 'true') }}
+    needs: gate
+    if: ${{ needs.gate.outputs.approved == 'true' }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -541,8 +495,8 @@ jobs:
   openapi-compat:
     name: OpenAPI Backward Compatibility
     runs-on: ubuntu-latest
-    needs: changes
-    if: ${{ needs.changes.outputs.approved == 'true' && needs.changes.outputs.openapi == 'true' }}
+    needs: gate
+    if: ${{ needs.gate.outputs.approved == 'true' }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -569,7 +523,7 @@ jobs:
     runs-on: ubuntu-latest
     if: always()
     needs:
-      - changes
+      - gate
       - python-lint
       - python-typecheck
       - python-schemas
@@ -584,7 +538,7 @@ jobs:
       - openapi-compat
     steps:
       - name: Require the "Ok to test" label
-        if: ${{ needs.changes.outputs.approved != 'true' }}
+        if: ${{ needs.gate.outputs.approved != 'true' }}
         run: |
           echo "::error::Pre-merge checks have not run. A maintainer must add the \"Ok to test\" label to this pull request."
           exit 1
