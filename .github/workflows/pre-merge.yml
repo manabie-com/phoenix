@@ -577,7 +577,6 @@ jobs:
       - python-integration-tests
       - python-migrations
       - python-packages
-      - typescript-app
       - typescript-packages
       - helm-tests
       - actions-security
