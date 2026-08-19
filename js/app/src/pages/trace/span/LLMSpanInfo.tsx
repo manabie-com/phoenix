@@ -3,6 +3,7 @@ import { Flex } from "@phoenix/components";
 import { LLMInput } from "./LLMInput";
 import { LLMMessagesCollapseProvider } from "./LLMMessagesCollapseContext";
 import { LLMOutput } from "./LLMOutput";
+import { withRawSpanMessageMedia } from "./media/rawSpanMessageMedia";
 import type { AttributeObject, SpanInfoData } from "./types";
 import { getLLMAttributes } from "./utils";
 
@@ -27,7 +28,7 @@ export function LLMSpanInfo({
     prompts,
     promptTemplate,
     invocationParameters,
-  } = getLLMAttributes(spanAttributes);
+  } = withRawSpanMessageMedia(getLLMAttributes(spanAttributes), spanAttributes);
 
   return (
     <Flex direction="column" gap="size-200">

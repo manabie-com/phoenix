@@ -8,6 +8,13 @@ import {
 const PNG_BYTES_REPR = String.raw`b'\x89PNG\r\n\x1a\n\x00'`;
 const PNG_BYTES = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00];
 
+/**
+ * One payload in both alphabets: bytes chosen so that every character that the two
+ * disagree about is exercised.
+ */
+const URL_SAFE_PAYLOAD = "-_-_";
+const STANDARD_PAYLOAD = "+/+/";
+
 describe("decodePythonBytesRepr", () => {
   it("decodes hex escapes, named escapes and literal characters", () => {
     expect(Array.from(decodePythonBytesRepr(PNG_BYTES_REPR)!)).toEqual(
@@ -63,12 +70,27 @@ describe("inlineMedia", () => {
     });
   });
 
+  it("translates a URL-safe payload into the alphabet the server decodes", () => {
+    // The Google GenAI SDK writes `inline_data.data` in the URL-safe alphabet, so a
+    // real `google-adk` span carries `-` and `_` where base64 has `+` and `/`. Left
+    // untranslated the payload is refused outright and the attachment is lost — the
+    // messages replay and the PDF does not.
+    expect(inlineMedia("application/pdf", URL_SAFE_PAYLOAD)).toEqual({
+      url: `data:application/pdf;base64,${STANDARD_PAYLOAD}`,
+      mediaType: "application/pdf",
+    });
+  });
+
   it("refuses a payload it cannot place", () => {
     expect(inlineMedia("", "iVBORw0K")).toBeNull();
     expect(inlineMedia("image/png", "not base64!!")).toBeNull();
     expect(inlineMedia("image/png", "b''")).toBeNull();
     // Length that cannot decode.
     expect(inlineMedia("image/png", "QQQ")).toBeNull();
+    // A `-` does not buy a token the length check: re-padding this to the next
+    // multiple of four is exactly what the check is here to prevent.
+    expect(inlineMedia("image/png", "foo-bar")).toBeNull();
+    expect(inlineMedia("image/png", "not-base64!!")).toBeNull();
   });
 });
 
@@ -101,6 +123,15 @@ describe("canonicalDataUrl", () => {
     expect(canonicalDataUrl("data:image/png;base64,not!!")).toBeNull();
     expect(canonicalDataUrl("data:image/png;base64,QQQ")).toBeNull();
     expect(canonicalDataUrl("data:image/png;base64,")).toBeNull();
+  });
+
+  it("rewrites a URL-safe payload into the alphabet the server decodes", () => {
+    expect(
+      canonicalDataUrl(`data:application/pdf;base64,${URL_SAFE_PAYLOAD}`)
+    ).toEqual({
+      url: `data:application/pdf;base64,${STANDARD_PAYLOAD}`,
+      mediaType: "application/pdf",
+    });
   });
 
   it("returns null for anything that is not a data URL", () => {

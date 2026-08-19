@@ -112,19 +112,36 @@ function toBase64(bytes: Uint8Array): string {
 }
 
 /**
- * Whether a string is base64 once its line breaks are taken out.
+ * The same payload in the standard base64 alphabet, or null when it is not base64.
  *
  * Length is checked as well as the alphabet: base64 encodes three bytes to four
  * characters, so a length that is not a multiple of four cannot decode. Without that
  * check a stray token beside a declared media type became a malformed `data:` URL that
  * failed server-side, instead of being skipped here.
+ *
+ * `-` and `_` are translated to `+` and `/` first, because the Google GenAI SDK writes
+ * `inline_data.data` in the URL-safe alphabet (RFC 4648 §5) — which is what a real
+ * `google-adk` span carries, and what both `atob` and Python's strict `b64decode`
+ * reject. The translation is lossless and unambiguous: neither alphabet uses the
+ * other's two characters, so a payload written in either survives it unchanged in
+ * meaning. Rejecting one instead cost the whole attachment silently — the messages
+ * replayed and the PDF did not.
+ *
+ * Returning the translated string rather than a boolean is what makes that fix stick:
+ * the payload is embedded in a `data:` URL, and the server decodes that URL strictly,
+ * so the URL has to carry the standard alphabet no matter which one was recorded.
+ *
+ * Padding is required rather than added. An unpadded payload is left to fail, because
+ * re-padding to the next multiple of four is exactly what would let a stray token
+ * (`foo-bar`) through the length check that is here to stop it.
  */
-function isBase64(value: string): boolean {
-  return (
-    value.length > 0 &&
-    value.length % 4 === 0 &&
-    /^[A-Za-z0-9+/]+={0,2}$/.test(value)
-  );
+function standardBase64(value: string): string | null {
+  const translated = value.replace(/-/g, "+").replace(/_/g, "/");
+  return translated.length > 0 &&
+    translated.length % 4 === 0 &&
+    /^[A-Za-z0-9+/]+={0,2}$/.test(translated)
+    ? translated
+    : null;
 }
 
 /** Inline media as the playground carries it: a canonical URL and its media type. */
@@ -156,8 +173,8 @@ export function canonicalDataUrl(url: string): CanonicalInlineMedia | null {
   if (!parameters.slice(1).split(";").includes("base64")) {
     return null;
   }
-  const compact = payload.replace(/\s/g, "");
-  if (!isBase64(compact)) {
+  const compact = standardBase64(payload.replace(/\s/g, ""));
+  if (compact == null) {
     return null;
   }
   const mediaType = normalizeMediaType(declaredType);
@@ -186,8 +203,7 @@ export function inlineMedia(
   if (bytes) {
     base64 = bytes.length > 0 ? toBase64(bytes) : null;
   } else {
-    const compact = payload.replace(/\s/g, "");
-    base64 = isBase64(compact) ? compact : null;
+    base64 = standardBase64(payload.replace(/\s/g, ""));
   }
   if (base64 == null) {
     return null;

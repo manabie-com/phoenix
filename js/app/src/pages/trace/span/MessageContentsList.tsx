@@ -3,7 +3,7 @@ import { css } from "@emotion/react";
 import { ConnectedMarkdownBlock } from "@phoenix/components/markdown";
 import type { AttributeMessageContent } from "@phoenix/openInference/tracing/types";
 import { formatContentAsString } from "@phoenix/utils/jsonUtils";
-import { isHostedMediaUrl } from "@phoenix/utils/mediaUtils";
+import { isRenderableMediaUrl } from "@phoenix/utils/mediaUtils";
 
 import { SpanMedia } from "./media/SpanMedia";
 import { SpanImage } from "./SpanImage";
@@ -50,9 +50,9 @@ function MessageContentListItem({
         </ConnectedMarkdownBlock>
       ) : null}
       {imageUrl ? (
-        // Media Phoenix stores needs resolving and may not be an image at all;
-        // anything else is an ordinary image URL and renders as it always did.
-        isHostedMediaUrl(imageUrl) ? (
+        // Stored and inline media both need resolving and may not be an image at
+        // all; an ordinary image URL renders as it always did.
+        isRenderableMediaUrl(imageUrl) ? (
           <SpanMedia url={imageUrl} />
         ) : (
           <SpanImage url={imageUrl} />

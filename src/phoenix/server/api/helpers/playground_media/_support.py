@@ -3,6 +3,7 @@
 import base64
 from typing import Any
 
+from phoenix.db.types.media import MEDIA_URL_PREFIX
 from phoenix.server.api.exceptions import BadRequest
 from phoenix.server.api.helpers.message_media import MediaContentBlock
 
@@ -51,6 +52,10 @@ def media_file_name(block: MediaContentBlock) -> str:
     uploaded before names were recorded has none, and the providers only need the
     name to be present and sensibly suffixed.
 
+    Only a hosted reference ends in a digest. Splitting a ``data:`` URL on ``/``
+    takes the tail of its own header instead, so an inline PDF was named
+    ``pdf;base64,J.pdf`` — in the provider request and, more visibly, in the trace.
+
     Args:
         block: The media block, already resolved.
 
@@ -59,9 +64,10 @@ def media_file_name(block: MediaContentBlock) -> str:
     """
     if name := block.get("file_name"):
         return name
-    digest = (block.get("url") or "").rsplit("/", 1)[-1][:12] or "document"
+    url = block.get("url") or ""
+    digest = url[len(MEDIA_URL_PREFIX) :][:12] if url.startswith(MEDIA_URL_PREFIX) else ""
     suffix = "pdf" if block.get("media_type") == "application/pdf" else "bin"
-    return f"{digest}.{suffix}"
+    return f"{digest or 'document'}.{suffix}"
 
 
 def media_data_url(block: MediaContentBlock, **kwargs: Any) -> str:

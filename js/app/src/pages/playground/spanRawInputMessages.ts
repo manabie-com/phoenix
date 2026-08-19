@@ -270,7 +270,7 @@ const readContent = (
  * validates the result rather than asserting it, since `Object.entries` cannot know
  * the map's keys are roles.
  */
-const chatRole = (role: unknown): ChatMessageRole => {
+export const chatRole = (role: unknown): ChatMessageRole => {
   const name = asString(role)?.toLowerCase();
   if (name == null) {
     return DEFAULT_CHAT_ROLE;

@@ -110,6 +110,33 @@ _DATA_URL_PATTERN = re.compile(
 )
 
 
+def decode_base64(payload: str) -> bytes:
+    """
+    Decode a base64 payload written in either alphabet.
+
+    ``base64.b64decode(..., validate=True)`` accepts only the standard alphabet, and
+    the Google GenAI SDK writes ``inline_data.data`` in the URL-safe one (RFC 4648
+    §5) — so a real ``google-adk`` span carries a payload that strict decoding
+    rejects outright. ``-`` and ``_`` are translated to ``+`` and ``/`` first, which
+    is lossless and unambiguous because neither alphabet uses the other's two
+    characters.
+
+    Validation is kept on. Silently discarding characters that belong to neither
+    alphabet is how a truncated payload becomes bytes that are not the media.
+
+    Args:
+        payload: The base64 payload, in either alphabet.
+
+    Returns:
+        The decoded bytes.
+
+    Raises:
+        binascii.Error: The payload is not valid base64.
+        ValueError: The payload is not valid base64.
+    """
+    return base64.b64decode(payload.replace("-", "+").replace("_", "/"), validate=True)
+
+
 class HostedMediaRef(NamedTuple):
     """A reference to media held in Phoenix's ``media_files`` table."""
 
@@ -134,7 +161,7 @@ class InlineMedia(NamedTuple):
             ValueError: The payload is not valid base64.
         """
         try:
-            return base64.b64decode(self.payload, validate=True)
+            return decode_base64(self.payload)
         except (binascii.Error, ValueError) as error:
             raise ValueError(f"data URL payload is not valid base64: {error}")
 

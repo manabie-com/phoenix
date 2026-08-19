@@ -10,7 +10,12 @@ from openinference.semconv.trace import SpanAttributes
 from pydantic import ValidationError
 
 from phoenix.db import models
-from phoenix.db.types.media import MediaContent, MediaVariable, hosted_media_url
+from phoenix.db.types.media import (
+    MEDIA_URL_PREFIX,
+    MediaContent,
+    MediaVariable,
+    hosted_media_url,
+)
 from phoenix.db.types.media_parts import (
     FileContentPart,
     ImageContentPart,
@@ -32,6 +37,7 @@ from phoenix.server.api.helpers.message_helpers import (
     prompt_chat_template_to_playground_messages,
 )
 from phoenix.server.api.helpers.message_media import (
+    MediaContentBlock,
     message_media,
     message_text,
     reject_media,
@@ -43,7 +49,11 @@ from phoenix.server.api.helpers.playground_clients import (
     GoogleClient,
     llm_input_messages,
 )
-from phoenix.server.api.helpers.playground_media import google_parts
+from phoenix.server.api.helpers.playground_media import (
+    google_parts,
+    media_file_name,
+    oi_message_content,
+)
 from phoenix.server.api.types.ChatCompletionMessageRole import ChatCompletionMessageRole
 from phoenix.server.types import DbSessionFactory
 from tests.unit.media_store_fixtures import isolated_media_store  # noqa: F401
@@ -1046,6 +1056,66 @@ class TestPdfPerProvider:
             "image/png",
             "application/pdf",
         ]
+
+
+class TestInlineDocumentsInATrace:
+    """
+    A document supplied inline rather than stored.
+
+    The description names the document and, for stored media, points at the exact
+    bytes. An inline `data:` URL is not a pointer at the bytes — it is the bytes, so
+    including one wrote a whole base64 PDF into a span attribute.
+    """
+
+    def _inline_block(self) -> MediaContentBlock:
+        return {
+            "type": "media",
+            "kind": "file",
+            "media_type": "application/pdf",
+            "url": f"data:application/pdf;base64,{base64.b64encode(_PDF_BYTES).decode()}",
+        }
+
+    def _description(self, block: MediaContentBlock) -> str:
+        """The text a document is recorded as; it is never image content."""
+        content = oi_message_content(block)
+        assert content["type"] == "text"
+        return content["text"]
+
+    def test_the_payload_is_not_written_into_the_description(self) -> None:
+        text = self._description(self._inline_block())
+        assert "base64," not in text
+        # A description the length of the document is the bug this guards.
+        assert len(text) < 200
+
+    def test_the_document_is_still_named_and_typed(self) -> None:
+        text = self._description(self._inline_block())
+        assert "document.pdf" in text
+        assert "application/pdf" in text
+
+    def test_an_inline_document_is_not_named_after_its_own_header(self) -> None:
+        # Splitting a `data:` URL on "/" took the tail of its header, so the file
+        # was named `pdf;base64,J.pdf` in the trace and in every provider request.
+        assert media_file_name(self._inline_block()) == "document.pdf"
+
+    def test_a_stored_document_still_keeps_its_digest_name(self) -> None:
+        block: MediaContentBlock = {
+            "type": "media",
+            "kind": "file",
+            "media_type": "application/pdf",
+            "url": _PDF_URL,
+        }
+        name = media_file_name(block)
+        assert name.endswith(".pdf")
+        assert name.split(".")[0] == _PDF_URL[len(MEDIA_URL_PREFIX) :][:12]
+
+    def test_a_stored_document_still_carries_its_reference(self) -> None:
+        block: MediaContentBlock = {
+            "type": "media",
+            "kind": "file",
+            "media_type": "application/pdf",
+            "url": _PDF_URL,
+        }
+        assert _PDF_URL in self._description(block)
 
 
 class TestPdfSpanAttributes:
