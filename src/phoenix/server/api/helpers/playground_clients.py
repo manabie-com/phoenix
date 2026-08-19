@@ -118,6 +118,8 @@ from phoenix.server.api.types.GenerativeProvider import (
 )
 from phoenix.utilities.json import jsonify
 
+from .openai_response_format import default_openai_strict
+
 if TYPE_CHECKING:
     from anthropic import AsyncAnthropic
     from anthropic.lib.streaming import AsyncMessageStreamManager
@@ -661,6 +663,7 @@ class OpenAICompatibleClient(PlaygroundClient["AsyncOpenAI"]):
                     fmt["description"] = js.description
                 if isinstance(js.strict, bool):
                     fmt["strict"] = js.strict
+                default_openai_strict(fmt)
                 params["text"] = ResponseTextConfigParam(format=fmt)
             elif TYPE_CHECKING:
                 assert_never(response_format.type)
