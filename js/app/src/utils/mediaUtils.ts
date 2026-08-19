@@ -37,6 +37,55 @@ export function isInlineMediaUrl(url: string): boolean {
 }
 
 /**
+ * The media type a `data:` URL declares, or null when the URL is not one.
+ *
+ * A stored reference says nothing about its own type — that is why
+ * `useIsRenderableImage` probes at all — but an inline payload states its type in
+ * the header, and reading it there is both exact and free. Probing one instead
+ * asks the browser to decode the whole payload to rediscover what it was told.
+ */
+export function declaredInlineMediaType(url: string): string | null {
+  return /^data:([-\w.+]+\/[-\w.+]+)/i.exec(url)?.[1]?.toLowerCase() ?? null;
+}
+
+/**
+ * The bytes a base64 `data:` URL carries, as a `Blob`, or null if it is not one.
+ *
+ * For handing inline media to the browser as something it will open. Chrome has
+ * refused top-frame navigation to a `data:` URL since Chrome 60 — the phishing
+ * vector it closes — so a link whose `href` is one does nothing when clicked, even
+ * with `target="_blank"`; opening it from the context menu works, because that is
+ * the browser acting rather than the page. A `blob:` URL is navigated to normally.
+ *
+ * It is also much cheaper to hold. A recovered document's `data:` URL is the whole
+ * payload — a megabyte of base64 sitting in an attribute — and the browser parses
+ * all of it on click before deciding to refuse.
+ *
+ * @param url The `data:` URL, whose payload must be standard-alphabet base64.
+ */
+export function dataUrlToBlob(url: string): Blob | null {
+  const match = /^data:([^;,]*)((?:;[^,]*)?),([\s\S]*)$/.exec(url);
+  if (match == null) {
+    return null;
+  }
+  const [, mediaType, parameters, payload] = match;
+  if (!parameters.slice(1).split(";").includes("base64")) {
+    return null;
+  }
+  try {
+    const binary = globalThis.atob(payload);
+    const bytes = new Uint8Array(binary.length);
+    for (let index = 0; index < binary.length; index++) {
+      bytes[index] = binary.charCodeAt(index);
+    }
+    return new Blob([bytes], { type: mediaType || "application/octet-stream" });
+  } catch {
+    // A payload `atob` refuses is one the link could not have opened anyway.
+    return null;
+  }
+}
+
+/**
  * Whether a value is media the browser can render, however it is carried.
  *
  * The distinction between stored and inline matters when *resolving* a reference;

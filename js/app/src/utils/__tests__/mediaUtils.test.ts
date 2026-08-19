@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
+  dataUrlToBlob,
   isHostedMediaUrl,
   mediaDisplayName,
   resolveMediaUrl,
@@ -155,5 +156,36 @@ describe("isHostedMediaUrl", () => {
     expect(isHostedMediaUrl("data:image/png;base64,AAAA")).toBe(false);
     expect(isHostedMediaUrl("__REDACTED__")).toBe(false);
     expect(isHostedMediaUrl("")).toBe(false);
+  });
+});
+
+describe("dataUrlToBlob", () => {
+  const PNG_B64 = "iVBORw0K";
+
+  it("carries the payload and its declared type", async () => {
+    const blob = dataUrlToBlob(`data:image/png;base64,${PNG_B64}`);
+    expect(blob).not.toBeNull();
+    expect(blob?.type).toBe("image/png");
+    // The exact bytes, not a re-encoding of them.
+    const bytes = new Uint8Array(await blob!.arrayBuffer());
+    expect(Array.from(bytes)).toEqual(
+      Array.from(globalThis.atob(PNG_B64), (c) => c.charCodeAt(0))
+    );
+  });
+
+  it("handles a document as readily as an image", () => {
+    expect(dataUrlToBlob("data:application/pdf;base64,JVBERi0K")?.type).toBe(
+      "application/pdf"
+    );
+  });
+
+  it("refuses anything it cannot turn into bytes", () => {
+    // Not a data URL at all, so the link is already navigable and is left alone.
+    expect(dataUrlToBlob("https://example.com/a.pdf")).toBeNull();
+    expect(dataUrlToBlob("phoenix://media/abc")).toBeNull();
+    // A data URL whose payload is not base64 is not one this app records.
+    expect(dataUrlToBlob("data:text/plain,hello")).toBeNull();
+    // A payload `atob` refuses could not have been opened anyway.
+    expect(dataUrlToBlob("data:image/png;base64,not!!base64")).toBeNull();
   });
 });

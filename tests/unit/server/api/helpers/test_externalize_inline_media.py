@@ -169,6 +169,40 @@ class TestBytesReprPayloads:
             assert await externalize_inline_media(session, part) == part
 
 
+class TestUrlSafeBase64Payloads:
+    """The alphabet the Google GenAI SDK actually writes.
+
+    ``inline_data.data`` comes back in the URL-safe alphabet (RFC 4648 §5), where
+    ``-`` and ``_`` stand for ``+`` and ``/``. Strict ``b64decode`` refuses it, so a
+    real ``google-adk`` span's PDF was left inline and unstored — and, on the client,
+    dropped from the playground entirely.
+    """
+
+    async def test_a_url_safe_payload_is_stored(self, db: DbSessionFactory) -> None:
+        payload = base64.urlsafe_b64encode(PNG_BYTES).decode()
+        async with db() as session:
+            result = await externalize_inline_media(session, gemini_part(payload))
+        assert result["inline_data"][MEDIA_URL_KEY].startswith(HOSTED_PREFIX)
+
+    async def test_the_original_bytes_come_back(self, db: DbSessionFactory) -> None:
+        payload = base64.urlsafe_b64encode(PNG_BYTES).decode()
+        async with db() as session:
+            result = await externalize_inline_media(session, gemini_part(payload))
+            reference = result["inline_data"][MEDIA_URL_KEY]
+        async with db() as session:
+            resolved = await resolve_media(session, [reference])
+        assert resolved[reference].content == PNG_BYTES
+
+    async def test_it_agrees_with_the_standard_spelling(self, db: DbSessionFactory) -> None:
+        # Same image, two alphabets, one stored object.
+        async with db() as session:
+            url_safe = await externalize_inline_media(
+                session, gemini_part(base64.urlsafe_b64encode(PNG_BYTES).decode())
+            )
+            standard = await externalize_inline_media(session, gemini_part(PNG_B64))
+        assert url_safe["inline_data"][MEDIA_URL_KEY] == standard["inline_data"][MEDIA_URL_KEY]
+
+
 class TestTheWalkDoesNotStopAtAnInlinePart:
     """An inline part is a mapping like any other; its siblings still get walked.
 

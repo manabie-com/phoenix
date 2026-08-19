@@ -1,6 +1,10 @@
 import { useIsRenderableImage } from "@phoenix/hooks/useIsRenderableImage";
 import { SpanImage } from "@phoenix/pages/trace/span/SpanImage";
-import { resolveMediaUrl } from "@phoenix/utils/mediaUtils";
+import {
+  declaredInlineMediaType,
+  resolveMediaUrl,
+} from "@phoenix/utils/mediaUtils";
+import { isSupportedImageMediaType } from "@phoenix/utils/supportedMediaTypes";
 
 import { MediaNotAnImage } from "./MediaNotAnImage";
 
@@ -25,10 +29,19 @@ import { MediaNotAnImage } from "./MediaNotAnImage";
  */
 export function SpanMedia({ url }: { url: string }) {
   const resolvedUrl = resolveMediaUrl(url);
-  const isImage = useIsRenderableImage(resolvedUrl);
+  // A `data:` URL states its own type, so probing one only asks the browser to
+  // decode a payload to learn what its header already said — and a recovered
+  // document's payload is the whole file. The hook still runs unconditionally,
+  // since a stored reference carries no type and is the case it exists for.
+  const declaredMediaType = declaredInlineMediaType(resolvedUrl);
+  const probedIsImage = useIsRenderableImage(resolvedUrl);
+  const isImage =
+    declaredMediaType == null
+      ? probedIsImage
+      : isSupportedImageMediaType(declaredMediaType);
 
   if (!isImage) {
-    return <MediaNotAnImage url={resolvedUrl} />;
+    return <MediaNotAnImage url={resolvedUrl} mediaType={declaredMediaType} />;
   }
   return <SpanImage url={resolvedUrl} />;
 }

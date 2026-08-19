@@ -31,7 +31,6 @@ reached. Only images round-trip.
 """
 
 import ast
-import base64
 import binascii
 from typing import Any, Mapping, Optional, Sequence
 
@@ -42,7 +41,7 @@ from openinference.semconv.trace import (
 )
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from phoenix.db.types.media import InlineMedia, parse_media_url
+from phoenix.db.types.media import InlineMedia, decode_base64, parse_media_url
 from phoenix.server.api.helpers.media import store_media
 from phoenix.server.api.helpers.message_media import (
     ContentBlock,
@@ -203,7 +202,9 @@ def _decode_inline_payload(payload: str) -> Optional[bytes]:
     entirely on what serialised the request. Two shapes turn up in practice and
     they are not interchangeable:
 
-    * **base64** — what the provider's own JSON wire format uses;
+    * **base64** — what the provider's own JSON wire format uses, in either
+      alphabet: the Google GenAI SDK writes the URL-safe one, so decoding goes
+      through :func:`decode_base64` rather than straight to ``b64decode``;
     * **a Python bytes repr** — ``b'\\x89PNG\\r\\n...'``, which is what happens
       when something reaches for ``str()`` on the bytes instead of encoding them.
       This is the shape a real Gemini span carries, and it is *worse* than base64:
@@ -226,7 +227,7 @@ def _decode_inline_payload(payload: str) -> Optional[bytes]:
             return None
         return literal if isinstance(literal, bytes) else None
     try:
-        return base64.b64decode(payload, validate=True)
+        return decode_base64(payload)
     except (binascii.Error, ValueError):
         return None
 

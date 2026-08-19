@@ -28,6 +28,9 @@ _PNG_BYTES = base64.b64decode(
     "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8DwHwAFAAH/q842iQAAAABJRU5ErkJggg=="
 )
 _PNG_DATA_URL = f"data:image/png;base64,{base64.b64encode(_PNG_BYTES).decode()}"
+#: Bytes whose base64 uses every character the standard and URL-safe alphabets
+#: disagree about: ``+/+/`` against ``-_-_``.
+_MIXED_BYTES = b"\xfb\xff\xbf"
 
 
 class TestParseMediaUrl:
@@ -95,6 +98,17 @@ class TestInlineMediaDecode:
     def test_rejects_corrupt_payload(self) -> None:
         with pytest.raises(ValueError, match="not valid base64"):
             InlineMedia(media_type="image/png", payload="!!!not-base64!!!").decode()
+
+    @pytest.mark.parametrize(
+        "alphabet, payload",
+        [
+            pytest.param("standard", "+/+/", id="standard"),
+            # What the Google GenAI SDK writes, and what strict decoding refuses.
+            pytest.param("url-safe", "-_-_", id="url-safe"),
+        ],
+    )
+    def test_decodes_either_base64_alphabet(self, alphabet: str, payload: str) -> None:
+        assert InlineMedia(media_type="image/png", payload=payload).decode() == _MIXED_BYTES
 
 
 class TestMediaContent:
