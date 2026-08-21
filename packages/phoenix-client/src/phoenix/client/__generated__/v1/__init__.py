@@ -114,10 +114,8 @@ class ChatCompletionTextPart(TypedDict):
     text: str
 
 
-class ChatCompletionUsage(TypedDict):
-    prompt_tokens: int
-    completion_tokens: int
-    total_tokens: int
+class ChatCompletionUsagePromptTokensDetails(TypedDict):
+    cached_tokens: int
 
 
 class CodeEvaluatorContext(TypedDict):
@@ -1389,6 +1387,13 @@ class ChatCompletionChoice(TypedDict):
 class ChatCompletionRequestMessage(TypedDict):
     role: Literal["system", "developer", "user", "assistant"]
     content: Union[str, Sequence[ChatCompletionTextPart]]
+
+
+class ChatCompletionUsage(TypedDict):
+    prompt_tokens: int
+    completion_tokens: int
+    total_tokens: int
+    prompt_tokens_details: NotRequired[ChatCompletionUsagePromptTokensDetails]
 
 
 class ContinuousAnnotationConfigData(TypedDict):
