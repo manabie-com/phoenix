@@ -33,22 +33,12 @@ const previewCSS = css`
 `;
 
 /*
- * Half-size tiles for a table cell, where the column is narrow enough that two
- * full-size ones wrap onto separate rows and swallow the whole cell — burying the
- * text the row is mostly about. `[data-attachment]` picks out the tile rather than
- * the container beside it, which carries the same `data-variant`.
+ * How much room a table cell can spare. The tiles size themselves from it — see
+ * `ExampleMediaAttachment`, which owns every measurement — so all this adds is the
+ * one thing a cell knows and a tile does not: that a variable name broken across two
+ * lines mid-word costs the column more than a caption wider than its tile does.
  */
 const compactCSS = css`
-  --example-media-tile-size: var(--global-dimension-size-800);
-
-  [data-attachment][data-variant="grid"] {
-    width: var(--example-media-tile-size);
-    height: var(--example-media-tile-size);
-  }
-
-  /* A tile this small is narrower than the names it carries, and a variable
-     broken across two lines mid-word is harder to read than a slightly wider
-     column. The caption sets the column width here instead of the tile. */
   .example-media__caption {
     width: auto;
     white-space: nowrap;
@@ -96,6 +86,7 @@ export function ExampleMediaPreview({
                 mediaKey={key}
                 label={label}
                 url={url}
+                compact={compact}
               />
             ))}
           </Attachments>

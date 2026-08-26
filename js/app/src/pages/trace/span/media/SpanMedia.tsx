@@ -1,3 +1,4 @@
+import { MediaNotAnImage } from "@phoenix/components/media/MediaNotAnImage";
 import { useIsRenderableImage } from "@phoenix/hooks/useIsRenderableImage";
 import { SpanImage } from "@phoenix/pages/trace/span/SpanImage";
 import {
@@ -5,8 +6,6 @@ import {
   resolveMediaUrl,
 } from "@phoenix/utils/mediaUtils";
 import { isSupportedImageMediaType } from "@phoenix/utils/supportedMediaTypes";
-
-import { MediaNotAnImage } from "./MediaNotAnImage";
 
 /**
  * Media that Phoenix itself stores, as recorded on a span.
