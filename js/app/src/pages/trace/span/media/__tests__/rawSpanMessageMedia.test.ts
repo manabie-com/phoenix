@@ -211,4 +211,106 @@ describe("withRawSpanMessageMedia", () => {
       )
     ).toBe(attributes);
   });
+
+  describe("when OpenInference redacted the image", () => {
+    // `OPENINFERENCE_BASE64_IMAGE_MAX_LENGTH` defaults to 32,000 characters, so a
+    // photograph is recorded as a content part holding `__REDACTED__` and drawn as
+    // the grey redacted tile. The bytes are still in the raw request.
+    const REDACTED = "__REDACTED__";
+    const PNG2_B64 = "iVBORw0A";
+    const LABEL_1 = "Attachment {sample_answer_1.jpg}:";
+    const LABEL_2 = "Attachment {sample_answer_2.jpg}:";
+
+    it("fills the placeholder with the image the raw request carried", () => {
+      const recorded: AttributeMessage[] = [
+        { role: "system", content: SYSTEM_PROMPT },
+        {
+          role: "user",
+          contents: [textContent(LABEL_1), imageContent(REDACTED)],
+        },
+      ];
+      const result = withRawSpanMessageMedia(
+        llmAttributes(recorded),
+        rawAttributes([
+          { text: LABEL_1 },
+          { inline_data: { mime_type: "image/png", data: PNG_B64 } },
+        ])
+      );
+      expect(mediaUrls(result, 1)).toEqual([
+        `data:image/png;base64,${PNG_B64}`,
+      ]);
+    });
+
+    it("fills each placeholder where it stood, under its own label", () => {
+      // The label names the tile that follows it, so appending the recovered images
+      // after the last line of text would caption every one of them wrongly — and
+      // leave the grey placeholders sitting above them.
+      const recorded: AttributeMessage[] = [
+        { role: "system", content: SYSTEM_PROMPT },
+        {
+          role: "user",
+          contents: [
+            textContent(LABEL_1),
+            imageContent(REDACTED),
+            textContent(LABEL_2),
+            imageContent(REDACTED),
+          ],
+        },
+      ];
+      const result = withRawSpanMessageMedia(
+        llmAttributes(recorded),
+        rawAttributes([
+          { text: LABEL_1 },
+          { inline_data: { mime_type: "image/png", data: PNG_B64 } },
+          { text: LABEL_2 },
+          { inline_data: { mime_type: "image/png", data: PNG2_B64 } },
+        ])
+      );
+      expect(result.inputMessages[1].contents).toEqual([
+        textContent(LABEL_1),
+        imageContent(`data:image/png;base64,${PNG_B64}`),
+        textContent(LABEL_2),
+        imageContent(`data:image/png;base64,${PNG2_B64}`),
+      ]);
+    });
+
+    it("fills only the placeholder when one image survived the cap", () => {
+      // A small picture is recorded and a large one is not, so the placeholder has to
+      // be matched to the payload image that stood in the same position.
+      const recorded: AttributeMessage[] = [
+        { role: "system", content: SYSTEM_PROMPT },
+        {
+          role: "user",
+          contents: [
+            imageContent("https://host/a.png"),
+            imageContent(REDACTED),
+          ],
+        },
+      ];
+      const result = withRawSpanMessageMedia(
+        llmAttributes(recorded),
+        rawAttributes([
+          { inline_data: { mime_type: "image/png", data: PNG_B64 } },
+          { inline_data: { mime_type: "image/png", data: PNG2_B64 } },
+        ])
+      );
+      expect(mediaUrls(result, 1)).toEqual([
+        "https://host/a.png",
+        `data:image/png;base64,${PNG2_B64}`,
+      ]);
+    });
+
+    it("leaves the placeholder alone when the raw request has no image for it", () => {
+      const attributes = llmAttributes([
+        { role: "system", content: SYSTEM_PROMPT },
+        {
+          role: "user",
+          contents: [textContent(LABEL_1), imageContent(REDACTED)],
+        },
+      ]);
+      expect(
+        withRawSpanMessageMedia(attributes, rawAttributes([{ text: LABEL_1 }]))
+      ).toBe(attributes);
+    });
+  });
 });

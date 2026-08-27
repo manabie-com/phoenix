@@ -85,7 +85,7 @@ import {
   TOOLS_PARSING_ERROR,
 } from "./constants";
 import {
-  mediaContentPartInputs,
+  orderedMessageContent,
   spanMessageParts,
   withMediaVariableValues,
   spanInputParsingErrors,
@@ -1606,7 +1606,11 @@ function chatMessageToPromptMessageInput(message: ChatMessage): {
     if (message.content) {
       content.push({ text: { text: message.content } });
     }
-    content.push(...mediaContentPartInputs(message));
+    content.splice(
+      0,
+      content.length,
+      ...orderedMessageContent(content, message)
+    );
   }
 
   return { role: chatRoleToPromptRole(message.role), content };
