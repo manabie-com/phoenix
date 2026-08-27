@@ -77,3 +77,19 @@ export type MediaPart =
   | ImageVariablePart
   | FilePart
   | FileVariablePart;
+
+/**
+ * Where a message's text and media sat relative to each other when it was read.
+ *
+ * A text segment, or the position of the nth image or nth document in the message's
+ * own `images` / `files` list. Recorded so a replayed span can be *sent* in the order
+ * the original request used, even though the editor lays the same message out as one
+ * text field followed by an attachment strip — see {@link mediaMessageShape}.
+ */
+export const contentLayoutPartSchema = z.union([
+  z.object({ text: z.string() }),
+  z.object({ image: z.number().int().nonnegative() }),
+  z.object({ file: z.number().int().nonnegative() }),
+]);
+
+export type ContentLayoutPart = z.infer<typeof contentLayoutPartSchema>;

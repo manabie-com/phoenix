@@ -29,7 +29,11 @@ import {
   ChatRoleMap,
   DEFAULT_CHAT_ROLE,
 } from "@phoenix/constants/generativeConstants";
-import type { FilePart, ImagePart } from "@phoenix/schemas/mediaPartSchemas";
+import type {
+  ContentLayoutPart,
+  FilePart,
+  ImagePart,
+} from "@phoenix/schemas/mediaPartSchemas";
 import type { ChatMessage } from "@phoenix/store/playground";
 import { generateMessageId } from "@phoenix/store/playground";
 import { isStringKeyedObject } from "@phoenix/typeUtils";
@@ -235,31 +239,53 @@ const readText = (value: unknown): string[] => {
   return leaf ? [leaf] : [];
 };
 
-/** The text and media of one message's content, read part by part. */
+/**
+ * The text and media of one message's content, read part by part.
+ *
+ * The order they came in is recorded as well as their contents. A provider request is
+ * the one place that order is still known — it is what the model actually saw, and in a
+ * prompt that captions each attachment with the line above it, the caption means
+ * nothing once the two are separated. `orderedMessageContent` sends it back this way.
+ */
 const readContent = (
   content: unknown
-): { text: string | undefined } & MessageMediaLists => {
+): {
+  text: string | undefined;
+  contentLayout: ContentLayoutPart[];
+} & MessageMediaLists => {
   const parts = Array.isArray(content) ? content : [content];
   const texts: string[] = [];
+  const contentLayout: ContentLayoutPart[] = [];
   const media: MessageMediaLists = { images: [], files: [] };
+  // One recorded part can read as several strings, and each is its own segment: they
+  // are rejoined the same way `joinTextParts` joins them, so the two agree by
+  // construction rather than by matching separators.
+  const addText = (found: string[]) => {
+    for (const text of found) {
+      texts.push(text);
+      contentLayout.push({ text });
+    }
+  };
   for (const part of parts) {
     const record = asRecord(part);
     if (record == null) {
-      texts.push(...readText(part));
+      addText(readText(part));
       continue;
     }
     const found = readPartMedia(record);
     if (found == null) {
-      texts.push(...readText(record));
+      addText(readText(record));
       continue;
     }
     if ("image" in found) {
+      contentLayout.push({ image: media.images.length });
       media.images.push(found.image);
     } else {
+      contentLayout.push({ file: media.files.length });
       media.files.push(found.file);
     }
   }
-  return { text: joinTextParts(texts), ...media };
+  return { text: joinTextParts(texts), contentLayout, ...media };
 };
 
 /**
@@ -296,7 +322,15 @@ export const chatRole = (role: unknown): ChatMessageRole => {
  */
 const chatMessage = (
   role: ChatMessageRole,
-  { text, images, files }: { text: string | undefined } & MessageMediaLists,
+  {
+    text,
+    images,
+    files,
+    contentLayout = [],
+  }: {
+    text: string | undefined;
+    contentLayout?: ContentLayoutPart[];
+  } & MessageMediaLists,
   toolCallId?: string | null
 ): ChatMessage => ({
   id: generateMessageId(),
@@ -304,6 +338,9 @@ const chatMessage = (
   content: text,
   ...(images.length > 0 ? { images } : {}),
   ...(files.length > 0 ? { files } : {}),
+  // Only carried when there is media to place; see `spanMessageParts` for why an empty
+  // layout is worse than none.
+  ...(images.length > 0 || files.length > 0 ? { contentLayout } : {}),
   ...(toolCallId ? { toolCallId } : {}),
 });
 
@@ -505,11 +542,21 @@ export function withRawSpanInputMedia(
     return messages;
   }
   return messages.map((message, index) => {
-    const { images, files } = fromPayload[index];
+    const { images, files, contentLayout } = fromPayload[index];
+    const takesImages = graftImages && !!images?.length;
+    const takesFiles = graftFiles && !!files?.length;
     return {
       ...message,
-      ...(graftImages && images?.length ? { images } : {}),
-      ...(graftFiles && files?.length ? { files } : {}),
+      ...(takesImages ? { images } : {}),
+      ...(takesFiles ? { files } : {}),
+      // The payload's layout, because the payload is the recording that still has the
+      // media — the attribute messages either never carried it or carried a redacted
+      // placeholder. It describes the whole message, so it is wrong whenever the
+      // message ends up holding media from both sources; `orderedMessageContent`
+      // detects exactly that and falls back, so the check does not need repeating here.
+      ...((takesImages || takesFiles) && contentLayout?.length
+        ? { contentLayout }
+        : {}),
     };
   });
 }

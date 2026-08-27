@@ -102,12 +102,14 @@ describe("spanMessageParts", () => {
   it("carries a stored reference with a supported placeholder media type", () => {
     expect(spanMessageParts([imagePart(STORED_URL)])).toEqual({
       images: [{ image: { url: STORED_URL, mediaType: "image/png" } }],
+      contentLayout: [{ image: 0 }],
     });
   });
 
   it("takes an inline image's media type from its data URL", () => {
     expect(spanMessageParts([imagePart(INLINE_URL)])).toEqual({
       images: [{ image: { url: INLINE_URL, mediaType: "image/jpeg" } }],
+      contentLayout: [{ image: 0 }],
     });
   });
 
@@ -134,6 +136,7 @@ describe("spanMessageParts", () => {
         { image: { url: STORED_URL, mediaType: "image/png" } },
         { image: { url: INLINE_URL, mediaType: "image/jpeg" } },
       ],
+      contentLayout: [{ image: 0 }, { text: "and" }, { image: 1 }],
     });
   });
 });
@@ -157,6 +160,7 @@ describe("spanMessageParts media-type gate", () => {
           },
         },
       ],
+      contentLayout: [{ image: 0 }],
     });
   });
 
@@ -173,6 +177,7 @@ describe("spanMessageParts media-type gate", () => {
           },
         },
       ],
+      contentLayout: [{ image: 0 }],
     });
   });
 
@@ -206,7 +211,10 @@ describe("spanMessageParts media-type gate", () => {
       spanMessageParts([
         { message_content: { type: "image", image: { image: { url } } } },
       ])
-    ).toEqual({ images: [{ image: { url, mediaType: "image/png" } }] });
+    ).toEqual({
+      images: [{ image: { url, mediaType: "image/png" } }],
+      contentLayout: [{ image: 0 }],
+    });
   });
 });
 
@@ -234,6 +242,7 @@ describe("spanMessageParts: a turn split across several text parts", () => {
     // Upstream yields undefined here; a "" would read as an empty message instead.
     expect(spanMessageParts([imagePart(STORED_URL)])).toEqual({
       images: [{ image: { url: STORED_URL, mediaType: "image/png" } }],
+      contentLayout: [{ image: 0 }],
     });
   });
 
@@ -247,6 +256,7 @@ describe("spanMessageParts: a turn split across several text parts", () => {
     ).toEqual({
       content: `${QUESTION}\n\n${ANSWER}`,
       images: [{ image: { url: STORED_URL, mediaType: "image/png" } }],
+      contentLayout: [{ text: QUESTION }, { image: 0 }, { text: ANSWER }],
     });
   });
 

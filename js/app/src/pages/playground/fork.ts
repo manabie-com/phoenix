@@ -9,7 +9,7 @@
  * Named after `mk/fork.mk`, which does the same job for the Makefile.
  */
 export {
-  mediaContentPartInputs,
+  orderedMessageContent,
   spanMessageParts,
   withMediaVariableValues,
 } from "./playgroundMedia";

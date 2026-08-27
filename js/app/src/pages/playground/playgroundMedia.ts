@@ -1,4 +1,8 @@
-import type { ImagePart, MediaKind } from "@phoenix/schemas/mediaPartSchemas";
+import type {
+  ContentLayoutPart,
+  ImagePart,
+  MediaKind,
+} from "@phoenix/schemas/mediaPartSchemas";
 import type { SpanMessageContentPart } from "@phoenix/schemas/spanMessageContentSchema";
 import type {
   PlaygroundInput,
@@ -166,6 +170,9 @@ export const withMediaVariableValues = (
   withMediaVariables({ variablesMap, variableKeys: [] }, { instances, input })
     .variablesMap;
 
+/** A text content part as the chat-completion wire format names it. */
+type TextContentPartInput = { text: { text: string } };
+
 /** A media content part as the chat-completion wire format names it. */
 export type MediaContentPartInput =
   | { image: { url: string; mediaType: string } }
@@ -229,6 +236,107 @@ export const REPLAYED_STORED_IMAGE_MEDIA_TYPE = "image/png";
 export const joinTextParts = (texts: readonly string[]): string | undefined =>
   texts.filter(Boolean).join("\n\n") || undefined;
 
+/** What a message needs to carry for its recorded layout to be replayable. */
+type LayoutMessage = {
+  content?: string;
+  contentLayout?: ContentLayoutPart[];
+  images?: { image: { url: string; mediaType: string } }[];
+  imageVariables?: { image: { variable: string } }[];
+  files?: { file: { url: string; mediaType: string } }[];
+  fileVariables?: { file: { variable: string } }[];
+};
+
+/**
+ * The message's content parts in their recorded order, or null when that order no
+ * longer describes the message.
+ *
+ * Null is the ordinary answer, not a failure: a message assembled in the playground or
+ * loaded from a prompt has no recorded layout at all, and the flat form is then the
+ * only form there is.
+ *
+ * Three things have to hold for a layout to still be usable, and each guards a way the
+ * message can move on from what was recorded:
+ *
+ * * every attachment placed exactly once and in the order the message holds them, so a
+ *   layout can never duplicate an image, drop one, or point past the end;
+ * * no media *variables*, which name media arriving with the run rather than media the
+ *   message holds — there is nothing for an index to point at;
+ * * the layout's text, rejoined, still equal to the message's text. This is the one
+ *   that matters in practice: the editor shows a message as a single field, so any edit
+ *   to it invalidates positions recorded against what it used to say. Falling back then
+ *   sends the edited text followed by the attachments, which is what the editor shows.
+ */
+const placedContentParts = (
+  message: LayoutMessage
+): (TextContentPartInput | MediaContentPartInput)[] | null => {
+  const layout = message.contentLayout;
+  if (layout == null || layout.length === 0) {
+    return null;
+  }
+  if (message.imageVariables?.length || message.fileVariables?.length) {
+    return null;
+  }
+  const parts: (TextContentPartInput | MediaContentPartInput)[] = [];
+  const texts: string[] = [];
+  let nextImage = 0;
+  let nextFile = 0;
+  for (const part of layout) {
+    if ("text" in part) {
+      texts.push(part.text);
+      parts.push({ text: { text: part.text } });
+      continue;
+    }
+    if ("image" in part) {
+      const held = message.images?.[part.image]?.image;
+      if (held == null || part.image !== nextImage++) {
+        return null;
+      }
+      parts.push({ image: { url: held.url, mediaType: held.mediaType } });
+      continue;
+    }
+    const held = message.files?.[part.file]?.file;
+    if (held == null || part.file !== nextFile++) {
+      return null;
+    }
+    parts.push({ file: { url: held.url, mediaType: held.mediaType } });
+  }
+  if (
+    nextImage !== (message.images?.length ?? 0) ||
+    nextFile !== (message.files?.length ?? 0)
+  ) {
+    return null;
+  }
+  return (joinTextParts(texts) ?? "") === (message.content ?? "")
+    ? parts
+    : null;
+};
+
+/**
+ * A message's content parts as they should be sent.
+ *
+ * The editor lays a message out as one text field and a strip of attachments, and for a
+ * message authored there that is also the order it goes out in — text, then pictures,
+ * then papers. A message read back from a span is different: the request it records
+ * interleaved them, captioning each attachment with the line above it, and sending it
+ * flattened asks the model to re-pair four labels with four pictures it now meets in a
+ * block. Where the recorded order survives, it is the order used.
+ *
+ * The already-built text parts are passed in rather than rebuilt so that the flat case
+ * comes out exactly as the caller made it, and only the interleaved case is this
+ * module's to construct.
+ *
+ * @param textContent The message's text parts as the caller built them.
+ * @param message The message being sent.
+ */
+export const orderedMessageContent = <T extends object>(
+  textContent: readonly T[],
+  message: LayoutMessage
+): (T | TextContentPartInput | MediaContentPartInput)[] =>
+  placedContentParts(message) ?? [
+    ...textContent,
+    ...mediaContentPartInputs(message),
+  ];
+
 /**
  * The text and images a recorded message carried, ready to spread onto its replay.
  *
@@ -258,17 +366,28 @@ export const joinTextParts = (texts: readonly string[]): string | undefined =>
  * Returns an object to spread rather than an array so that a message with no usable
  * image is left exactly as it was, with no empty `images` on it.
  *
+ * The order the parts arrived in is recorded alongside them. The editor cannot show it
+ * — a message there is one text field and a strip of attachments — but the run can send
+ * it, which is the half that decides what the model sees. See {@link
+ * orderedMessageContent}.
+ *
  * @param contents The message's `contents` from the span attributes, if it had any.
  */
 export const spanMessageParts = (
   contents: SpanMessageContentPart[] | undefined
-): { content?: string; images?: ImagePart[] } => {
+): {
+  content?: string;
+  images?: ImagePart[];
+  contentLayout?: ContentLayoutPart[];
+} => {
   const images: ImagePart[] = [];
   const texts: string[] = [];
+  const contentLayout: ContentLayoutPart[] = [];
   for (const part of contents ?? []) {
     const text = part.message_content.text;
     if (part.message_content.type === "text" && typeof text === "string") {
       texts.push(text);
+      contentLayout.push({ text });
     }
     const url = part.message_content.image?.image?.url;
     if (!url) {
@@ -288,12 +407,16 @@ export const spanMessageParts = (
     }
     const image = makeImagePart(resolved.url, resolved.mediaType);
     if (image) {
+      contentLayout.push({ image: images.length });
       images.push(image);
     }
   }
   return {
     // Only when upstream would have thrown text away.
     ...(texts.length > 1 ? { content: joinTextParts(texts) } : {}),
-    ...(images.length > 0 ? { images } : {}),
+    // The layout is only ever consulted to place media, so a message with none has
+    // nothing to say with it — and an empty one would only be another thing to keep
+    // consistent with the text as it is edited.
+    ...(images.length > 0 ? { images, contentLayout } : {}),
   };
 };
