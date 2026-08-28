@@ -507,12 +507,16 @@ jobs:
         env:
           BASE_REF: ${{ github.base_ref }}
         run: |
-          jq '.paths |= with_entries(select(.key | startswith("/agent") | not))' \
+          # Excludes the still-fast-moving agent/PXI routes, wherever upstream
+          # currently mounts them (top-level `/agents/...` historically,
+          # `/v1/agent_sessions/...` as of the 2026-08 rename) — matched by
+          # prefix so a future reshuffle under either mount point stays covered.
+          jq '.paths |= with_entries(select(.key | test("^/(v1/)?agent") | not))' \
             schemas/openapi.json > head.json
           git checkout "origin/$BASE_REF"
       - name: Snapshot base schema
         run: |
-          jq '.paths |= with_entries(select(.key | startswith("/agent") | not))' \
+          jq '.paths |= with_entries(select(.key | test("^/(v1/)?agent") | not))' \
             schemas/openapi.json > base.json
       - uses: docker://openapitools/openapi-diff@sha256:82291446e5554742d9c0725d7b315d18e93958c5526f9a663e8885227bdd6cb6
         with:
