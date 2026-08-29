@@ -9,6 +9,10 @@ import { RouterProvider } from "react-router/dom";
 
 import { buildRouteInfoCatalog } from "@phoenix/agent/tools/getRouteInfo/catalog";
 import { registerRouteInfoCatalog } from "@phoenix/agent/tools/getRouteInfo/routeCatalogRegistry";
+import {
+  createDataRouterNavigationStateSource,
+  registerRouterNavigationStateSource,
+} from "@phoenix/agent/tools/navigation/routerStateRegistry";
 import type { DatasetEvaluatorDetailsLoaderData } from "@phoenix/pages/dataset/evaluators/datasetEvaluatorDetailsLoader";
 import { datasetEvaluatorDetailsLoader } from "@phoenix/pages/dataset/evaluators/datasetEvaluatorDetailsLoader";
 import { DatasetEvaluatorDetailsPage } from "@phoenix/pages/dataset/evaluators/DatasetEvaluatorDetailsPage";
@@ -67,6 +71,7 @@ import {
   ExamplePage,
   examplesLoader,
   ExamplesPage,
+  ChatPage,
   ExperimentComparePage,
   ExperimentDetailPage,
   ExperimentsPage,
@@ -78,6 +83,7 @@ import {
   PlaygroundPage,
   playgroundPageLoader,
   ProfileAccountPage,
+  ProfileAccessibilityPage,
   ProfileAPIKeysPage,
   ProfileAuthorizedApplicationsPage,
   ProfileGenerativeAIPage,
@@ -114,6 +120,7 @@ import { GraphQLPage } from "./pages/apis/GraphQLPage";
 import { RestAPIPage } from "./pages/apis/RestAPIPage";
 import { Layout } from "./pages/Layout";
 import { layoutLoader } from "./pages/layoutLoader";
+import { NotFoundPage } from "./pages/NotFound";
 import { ProjectConfigPage } from "./pages/project/ProjectConfigPage";
 import { ProjectRoot } from "./pages/project/ProjectRoot";
 import { promptConfigLoader } from "./pages/prompt/promptConfigLoader";
@@ -207,7 +214,7 @@ export const appRouteObjects = createRoutesFromElements(
             agentRoute: {
               label: "Profile",
               description:
-                "Open personal account settings, API keys, connected applications, and display preferences.",
+                "Open personal account settings, API keys, connected applications, display preferences, and accessibility options.",
             },
           }}
           element={<ProfilePage />}
@@ -284,6 +291,24 @@ export const appRouteObjects = createRoutesFromElements(
                 label: "Preferences",
                 description: "Theme, timezone, and code defaults",
                 icon: "Options",
+              },
+            }}
+          />
+          <Route
+            path="accessibility"
+            element={<ProfileAccessibilityPage />}
+            handle={{
+              crumb: () => "Accessibility",
+              agentRoute: {
+                label: "Profile Accessibility",
+                description:
+                  "Configure accessibility options and use native scrollbars from your browser and operating system.",
+              },
+              navigation: {
+                section: "Profile",
+                label: "Accessibility",
+                description: "Native scrollbar and accessibility options",
+                icon: "Eye",
               },
             }}
           />
@@ -714,6 +739,24 @@ export const appRouteObjects = createRoutesFromElements(
           />
         </Route>
         <Route
+          path="/chat"
+          element={<ChatPage />}
+          handle={{
+            crumb: () => "Chat",
+            navigation: {
+              section: "Pages",
+              label: "Chat",
+              description: "Chat directly with the configured models",
+              icon: "MessageCircle",
+            },
+            agentRoute: {
+              label: "Chat",
+              description:
+                "Chat directly with the configured models. Set a system prompt and tune temperature, top P, and max output tokens.",
+            },
+          }}
+        />
+        <Route
           path="/evaluators"
           handle={{
             crumb: () => "Evaluators",
@@ -1120,6 +1163,8 @@ export const appRouteObjects = createRoutesFromElements(
           loader={exampleRedirectLoader}
           errorElement={<ErrorElement />}
         />
+        {/* Catch-all: render a 404 page for any unmatched URL. */}
+        <Route path="*" element={<NotFoundPage />} />
       </Route>
     </Route>
   </Route>
@@ -1134,6 +1179,16 @@ registerRouteNavigationCatalog({
 
 const router = createBrowserRouter(appRouteObjects, {
   basename: window.Config.basename,
+});
+
+// The navigation.goTo operation judges whether a navigation settled from the
+// router's own state — the rendered pathname lags it whenever the destination
+// page suspends inside the navigation transition.
+registerRouterNavigationStateSource({
+  source: createDataRouterNavigationStateSource({
+    router,
+    basename: window.Config.basename,
+  }),
 });
 
 export function AppRoutes() {
