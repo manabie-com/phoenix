@@ -507,12 +507,12 @@ jobs:
         env:
           BASE_REF: ${{ github.base_ref }}
         run: |
-          jq '.paths |= with_entries(select(.key | startswith("/agent") | not))' \
+          jq '.paths |= with_entries(select(.key | test("^(/v1)?/agent") | not))' \
             schemas/openapi.json > head.json
           git checkout "origin/$BASE_REF"
       - name: Snapshot base schema
         run: |
-          jq '.paths |= with_entries(select(.key | startswith("/agent") | not))' \
+          jq '.paths |= with_entries(select(.key | test("^(/v1)?/agent") | not))' \
             schemas/openapi.json > base.json
       - uses: docker://openapitools/openapi-diff@sha256:82291446e5554742d9c0725d7b315d18e93958c5526f9a663e8885227bdd6cb6
         with:
