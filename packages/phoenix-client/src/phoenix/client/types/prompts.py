@@ -77,6 +77,7 @@ class PromptVersion(PromptMessagesMixin):
             "MOONSHOT",
             "PERPLEXITY",
             "TOGETHER",
+            "ZAI",
         ] = "OPENAI",
         template_format: Literal["F_STRING", "MUSTACHE", "NONE"] = "MUSTACHE",
     ) -> None:
@@ -113,6 +114,7 @@ class PromptVersion(PromptMessagesMixin):
             "MOONSHOT",
             "PERPLEXITY",
             "TOGETHER",
+            "ZAI",
         ] = model_provider
         self._template_format: Literal["F_STRING", "MUSTACHE", "NONE"] = template_format
         self._description = description
@@ -131,6 +133,7 @@ class PromptVersion(PromptMessagesMixin):
             v1.PromptMoonshotInvocationParameters,
             v1.PromptPerplexityInvocationParameters,
             v1.PromptTogetherInvocationParameters,
+            v1.PromptZAIInvocationParameters,
         ]
         if model_provider == "OPENAI":
             self._invocation_parameters = v1.PromptOpenAIInvocationParameters(
@@ -203,6 +206,11 @@ class PromptVersion(PromptMessagesMixin):
             self._invocation_parameters = v1.PromptTogetherInvocationParameters(
                 type="together",
                 together=v1.PromptTogetherInvocationParametersContent(),
+            )
+        elif model_provider == "ZAI":
+            self._invocation_parameters = v1.PromptZAIInvocationParameters(
+                type="zai",
+                zai=v1.PromptZAIInvocationParametersContent(),
             )
         else:
             assert_never(model_provider)
@@ -527,6 +535,7 @@ def _to_sdk(
         "MOONSHOT",
         "PERPLEXITY",
         "TOGETHER",
+        "ZAI",
     ],
 ) -> SDK:
     if model_provider == "OPENAI":
@@ -556,5 +565,7 @@ def _to_sdk(
     if model_provider == "PERPLEXITY":
         return "openai"
     if model_provider == "TOGETHER":
+        return "openai"
+    if model_provider == "ZAI":
         return "openai"
     assert_never(model_provider)
