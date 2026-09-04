@@ -9,6 +9,10 @@ import { RouterProvider } from "react-router/dom";
 
 import { buildRouteInfoCatalog } from "@phoenix/agent/tools/getRouteInfo/catalog";
 import { registerRouteInfoCatalog } from "@phoenix/agent/tools/getRouteInfo/routeCatalogRegistry";
+import {
+  createDataRouterNavigationStateSource,
+  registerRouterNavigationStateSource,
+} from "@phoenix/agent/tools/navigation/routerStateRegistry";
 import type { DatasetEvaluatorDetailsLoaderData } from "@phoenix/pages/dataset/evaluators/datasetEvaluatorDetailsLoader";
 import { datasetEvaluatorDetailsLoader } from "@phoenix/pages/dataset/evaluators/datasetEvaluatorDetailsLoader";
 import { DatasetEvaluatorDetailsPage } from "@phoenix/pages/dataset/evaluators/DatasetEvaluatorDetailsPage";
@@ -25,7 +29,7 @@ import { settingsPromptsPageLoader } from "@phoenix/pages/settings/prompts/setti
 import { RetentionPolicyDetailsDrawer } from "@phoenix/pages/settings/RetentionPolicyDetailsDrawer";
 import { SettingsSecretsPage } from "@phoenix/pages/settings/secrets/SettingsSecretsPage";
 import { settingsSecretsPageLoader } from "@phoenix/pages/settings/secrets/settingsSecretsPageLoader";
-import { settingsAgentsPageLoader } from "@phoenix/pages/settings/settingsAgentsPageLoader";
+import { settingsAgentsChatsLoader } from "@phoenix/pages/settings/settingsAgentsChatsLoader";
 import { SettingsAIProvidersPage } from "@phoenix/pages/settings/SettingsAIProvidersPage";
 import { settingsAIProvidersPageLoader } from "@phoenix/pages/settings/settingsAIProvidersPageLoader";
 import { SettingsAnnotationsPage } from "@phoenix/pages/settings/SettingsAnnotationsPage";
@@ -67,6 +71,7 @@ import {
   ExamplePage,
   examplesLoader,
   ExamplesPage,
+  ChatPage,
   ExperimentComparePage,
   ExperimentDetailPage,
   ExperimentsPage,
@@ -78,6 +83,7 @@ import {
   PlaygroundPage,
   playgroundPageLoader,
   ProfileAccountPage,
+  ProfileAccessibilityPage,
   ProfileAPIKeysPage,
   ProfileAuthorizedApplicationsPage,
   ProfileGenerativeAIPage,
@@ -104,7 +110,12 @@ import {
   settingsGeneralPageLoader,
   SettingsPage,
   SettingsPromptsPage,
+  SettingsAgentsChatsTab,
+  SettingsAgentsGeneralTab,
   SettingsAgentsPage,
+  SettingsAgentsPermissionsTab,
+  SettingsAgentsToolsTab,
+  SettingsAgentsTracingTab,
   SpanPlaygroundPage,
   spanPlaygroundPageLoader,
   SupportPage,
@@ -114,6 +125,7 @@ import { GraphQLPage } from "./pages/apis/GraphQLPage";
 import { RestAPIPage } from "./pages/apis/RestAPIPage";
 import { Layout } from "./pages/Layout";
 import { layoutLoader } from "./pages/layoutLoader";
+import { NotFoundPage } from "./pages/NotFound";
 import { ProjectConfigPage } from "./pages/project/ProjectConfigPage";
 import { ProjectRoot } from "./pages/project/ProjectRoot";
 import { promptConfigLoader } from "./pages/prompt/promptConfigLoader";
@@ -207,7 +219,7 @@ export const appRouteObjects = createRoutesFromElements(
             agentRoute: {
               label: "Profile",
               description:
-                "Open personal account settings, API keys, connected applications, and display preferences.",
+                "Open personal account settings, API keys, connected applications, display preferences, and accessibility options.",
             },
           }}
           element={<ProfilePage />}
@@ -284,6 +296,24 @@ export const appRouteObjects = createRoutesFromElements(
                 label: "Preferences",
                 description: "Theme, timezone, and code defaults",
                 icon: "Options",
+              },
+            }}
+          />
+          <Route
+            path="accessibility"
+            element={<ProfileAccessibilityPage />}
+            handle={{
+              crumb: () => "Accessibility",
+              agentRoute: {
+                label: "Profile Accessibility",
+                description:
+                  "Configure accessibility options and use native scrollbars from your browser and operating system.",
+              },
+              navigation: {
+                section: "Profile",
+                label: "Accessibility",
+                description: "Native scrollbar and accessibility options",
+                icon: "Eye",
               },
             }}
           />
@@ -714,6 +744,24 @@ export const appRouteObjects = createRoutesFromElements(
           />
         </Route>
         <Route
+          path="/chat"
+          element={<ChatPage />}
+          handle={{
+            crumb: () => "Chat",
+            navigation: {
+              section: "Pages",
+              label: "Chat",
+              description: "Chat directly with the configured models",
+              icon: "MessageCircle",
+            },
+            agentRoute: {
+              label: "Chat",
+              description:
+                "Chat directly with the configured models. Set a system prompt and tune temperature, top P, and max output tokens.",
+            },
+          }}
+        />
+        <Route
           path="/evaluators"
           handle={{
             crumb: () => "Evaluators",
@@ -1079,16 +1127,28 @@ export const appRouteObjects = createRoutesFromElements(
           <Route
             path="agents"
             element={<SettingsAgentsPage />}
-            loader={settingsAgentsPageLoader}
             handle={{
               crumb: () => "Agents",
               agentRoute: {
                 label: "Agent Settings",
                 description:
-                  "Configure the assistant, PXI enablement, agent model, edit approvals, experiment flags, trace collection, and manage saved assistant sessions.",
+                  "Configure the assistant across topical tabs, each a nested route: General (enable assistant, model, floating button, temporary chats), tools (web search, subagents, GitHub token), permissions (assistant access, edit approvals), tracing (trace saving, export, attribution), and chats (retention rules, saved assistant sessions).",
               },
             }}
-          />
+          >
+            <Route index element={<SettingsAgentsGeneralTab />} />
+            <Route path="tools" element={<SettingsAgentsToolsTab />} />
+            <Route
+              path="permissions"
+              element={<SettingsAgentsPermissionsTab />}
+            />
+            <Route path="tracing" element={<SettingsAgentsTracingTab />} />
+            <Route
+              path="chats"
+              element={<SettingsAgentsChatsTab />}
+              loader={settingsAgentsChatsLoader}
+            />
+          </Route>
         </Route>
         <Route
           path="/redirects/spans/:span_otel_id"
@@ -1120,6 +1180,8 @@ export const appRouteObjects = createRoutesFromElements(
           loader={exampleRedirectLoader}
           errorElement={<ErrorElement />}
         />
+        {/* Catch-all: render a 404 page for any unmatched URL. */}
+        <Route path="*" element={<NotFoundPage />} />
       </Route>
     </Route>
   </Route>
@@ -1134,6 +1196,16 @@ registerRouteNavigationCatalog({
 
 const router = createBrowserRouter(appRouteObjects, {
   basename: window.Config.basename,
+});
+
+// The navigation.goTo operation judges whether a navigation settled from the
+// router's own state — the rendered pathname lags it whenever the destination
+// page suspends inside the navigation transition.
+registerRouterNavigationStateSource({
+  source: createDataRouterNavigationStateSource({
+    router,
+    basename: window.Config.basename,
+  }),
 });
 
 export function AppRoutes() {

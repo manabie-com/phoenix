@@ -67,7 +67,7 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  UV_VERSION: "0.12.1"
+  UV_VERSION: "0.12.7"
   # fake openai key so that llama_index doesn't download huggingface embeddings
   OPENAI_API_KEY: "sk-fake-openai-key"
 
@@ -496,7 +496,11 @@ jobs:
     name: OpenAPI Backward Compatibility
     runs-on: ubuntu-latest
     needs: gate
-    if: ${{ needs.gate.outputs.approved == 'true' }}
+    # Same rationale as .github/workflows/openapi-schema.yaml: a fork sync PR
+    # carries upstream's own schema evolution (new provider unions, retired
+    # endpoints), which this diff correctly reports as incompatible even
+    # though it is upstream's own change, not a fork regression.
+    if: ${{ needs.gate.outputs.approved == 'true' && !contains(github.event.pull_request.labels.*.name, 'upstream-sync') }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -507,12 +511,12 @@ jobs:
         env:
           BASE_REF: ${{ github.base_ref }}
         run: |
-          jq '.paths |= with_entries(select(.key | startswith("/agent") | not))' \
+          jq '.paths |= with_entries(select(.key | test("^(/v1)?/agent") | not))' \
             schemas/openapi.json > head.json
           git checkout "origin/$BASE_REF"
       - name: Snapshot base schema
         run: |
-          jq '.paths |= with_entries(select(.key | startswith("/agent") | not))' \
+          jq '.paths |= with_entries(select(.key | test("^(/v1)?/agent") | not))' \
             schemas/openapi.json > base.json
       - uses: docker://openapitools/openapi-diff@sha256:82291446e5554742d9c0725d7b315d18e93958c5526f9a663e8885227bdd6cb6
         with:

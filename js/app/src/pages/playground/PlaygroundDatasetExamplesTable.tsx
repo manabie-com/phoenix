@@ -584,7 +584,7 @@ function TableBody<T>({
 }) {
   "use no memo";
   const rows = table.getRowModel().rows;
-  // eslint-disable-next-line react-hooks-js/incompatible-library
+  // eslint-disable-next-line react/incompatible-library
   const virtualizer = useVirtualizer({
     count: rows.length,
     getScrollElement: () => tableContainerRef.current,
@@ -949,6 +949,7 @@ export function PlaygroundDatasetExamplesTable({
 
   const onNext = useCallback(
     (instanceId: number) =>
+      // oxlint-disable-next-line complexity -- Subscription events update several independent progress and result stores.
       (response?: PlaygroundDatasetExamplesTableSubscription$data | null) => {
         if (response == null) {
           return;

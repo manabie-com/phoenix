@@ -101,6 +101,10 @@ input AgentCustomProviderModelSelectionInput {
   modelName: String!
 }
 
+type AgentGithubEnabled {
+  enabled: Boolean!
+}
+
 union AgentModelSelection = AgentCustomProviderModelSelection | AgentBuiltinProviderModelSelection
 
 input AgentModelSelectionInput @oneOf {
@@ -210,6 +214,21 @@ type AgentsConfig {
   Admin ceiling for the agent assistant feature. Sourced from the `agent.assistant.enabled` system setting. When False, agent chat is disabled for the entire workspace regardless of individual user preferences.
   """
   assistantEnabled: Boolean!
+
+  """
+  Deploy-time ceiling for the PXI GitHub tools: true when external resources are allowed and PHOENIX_AGENTS_DISABLE_GITHUB is unset. When false, the GitHub settings UI is hidden entirely.
+  """
+  githubServerEnabled: Boolean!
+
+  """
+  Whether the PXI GitHub tools are effectively enabled: requires the `agent.assistant.github` system setting to be on (default on), PHOENIX_AGENTS_DISABLE_GITHUB to be unset, and external resources to be allowed.
+  """
+  githubEnabled: Boolean!
+
+  """
+  Whether a workspace-wide GitHub token is configured (the GITHUB_PERSONAL_ACCESS_TOKEN secret or environment variable). When false, each user must supply their own personal access token.
+  """
+  githubWorkspaceTokenConfigured: Boolean!
 
   """
   Admin ceiling for persisting PXI traces in this Phoenix instance. Sourced from the `agent.assistant.trace_recording` system setting. When False, users cannot turn on local trace recording for themselves.
@@ -452,23 +471,6 @@ enum AuthMethod {
   LOCAL
   OAUTH2
   LDAP
-}
-
-"""
-Inputs that determine which assistant skills are available given the current state of the UI.
-"""
-input AvailableAgentSkillsInput {
-  """Whether a playground instance is mounted in the current UI context."""
-  hasPlaygroundContext: Boolean! = false
-
-  """Whether a dataset is mounted in the current UI context."""
-  hasDatasetContext: Boolean! = false
-
-  """Whether an LLM evaluator is mounted in the current UI context."""
-  hasLlmEvaluatorContext: Boolean! = false
-
-  """Whether a code evaluator is mounted in the current UI context."""
-  hasCodeEvaluatorContext: Boolean! = false
 }
 
 type AzureADTokenProvider {
@@ -2435,6 +2437,7 @@ enum GenerativeProviderKey {
   MOONSHOT
   PERPLEXITY
   TOGETHER
+  ZAI
 }
 
 type GoogleGenAIAuthenticationMethod {
@@ -2617,6 +2620,7 @@ enum ModelProvider {
   MOONSHOT
   PERPLEXITY
   TOGETHER
+  ZAI
 }
 
 input ModelsInput {
@@ -2741,6 +2745,7 @@ type Mutation {
   patchSpanAnnotations(input: [PatchAnnotationInput!]!): SpanAnnotationMutationPayload!
   deleteSpanAnnotations(input: DeleteAnnotationsInput!): SpanAnnotationMutationPayload!
   setAgentAssistantEnabled(input: SetAgentAssistantEnabledInput!): AgentAssistantEnabled!
+  setAgentGithubEnabled(input: SetAgentGithubEnabledInput!): AgentGithubEnabled!
   setAgentTraceRecording(input: SetAgentTraceRecordingInput!): AgentTraceRecording!
   setAgentSessionRetention(input: SetAgentSessionRetentionInput!): AgentSessionRetention!
   createProjectSessionAnnotations(input: CreateProjectSessionAnnotationInput!): ProjectSessionAnnotationMutationPayload!
@@ -3938,9 +3943,7 @@ type Query {
   """
   agentSessions(first: Int = 20, after: String, viewerOnly: Boolean! = true): AgentSessionConnection!
   agentsConfig: AgentsConfig!
-
-  """The assistant skills available given the supplied UI context."""
-  availableAgentSkills(input: AvailableAgentSkillsInput): [AgentSkill!]!
+  availableAgentSkills: [AgentSkill!]!
   validateRegularExpression(regex: String!): ValidationResult!
   getSpanByOtelId(spanId: String!): Span
   getTraceByOtelId(traceId: String!): Trace
@@ -4174,6 +4177,10 @@ type ServerStatus {
 }
 
 input SetAgentAssistantEnabledInput {
+  enabled: Boolean!
+}
+
+input SetAgentGithubEnabledInput {
   enabled: Boolean!
 }
 

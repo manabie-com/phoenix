@@ -121,6 +121,7 @@ from phoenix.utilities.json import jsonify
 from .openai_response_format import default_openai_strict
 
 if TYPE_CHECKING:
+    import httpx2
     from anthropic import AsyncAnthropic
     from anthropic.lib.streaming import AsyncMessageStreamManager
     from anthropic.types import MessageParam, TextBlockParam, ToolUseBlockParam
@@ -1176,6 +1177,16 @@ class OpenAICompatibleClient(PlaygroundClient["AsyncOpenAI"]):
                     pass
                 elif event.type == "response.custom_tool_call_input.delta":
                     pass
+                elif event.type == "response.shell_call_command.added":
+                    pass
+                elif event.type == "response.shell_call_command.delta":
+                    pass
+                elif event.type == "response.shell_call_command.done":
+                    pass
+                elif event.type == "response.shell_call_output_content.delta":
+                    pass
+                elif event.type == "response.shell_call_output_content.done":
+                    pass
                 elif TYPE_CHECKING:
                     assert_never(event.type)
 
@@ -1427,9 +1438,23 @@ class TogetherClient(OpenAICompatibleClient):
 
 
 @register_llm_client(
+    provider_key=GenerativeProviderKey.ZAI,
+    model_names=[
+        PROVIDER_DEFAULT,
+        "glm-4.6",
+        "glm-4.5",
+        "glm-4.5-air",
+    ],
+)
+class ZAIClient(OpenAICompatibleClient):
+    pass
+
+
+@register_llm_client(
     provider_key=GenerativeProviderKey.AWS,
     model_names=[
         PROVIDER_DEFAULT,
+        "anthropic.claude-fable-5-1",
         "anthropic.claude-fable-5",
         "anthropic.claude-opus-5",
         "anthropic.claude-opus-4-8",
@@ -1642,13 +1667,20 @@ class BedrockClient(PlaygroundClient["BedrockRuntimeClient"]):
                 )
                 if fn.description:
                     tool_spec["description"] = fn.description
+                if isinstance(fn.strict, bool):
+                    tool_spec["strict"] = fn.strict
                 tool_list.append(ToolTypeDef(toolSpec=tool_spec))
 
             tool_config = ToolConfigurationTypeDef(tools=tool_list)
 
+            # The Converse API has no disable-parallel-tool-use setting, so
+            # tools.disable_parallel_tool_calls cannot be honored here.
+            send_tools = True
             if tc := tools.tool_choice:
                 if tc.type == "none":
-                    pass
+                    # Converse has no "none" tool choice; withholding the
+                    # tools entirely is the only way to prevent tool calls.
+                    send_tools = False
                 elif tc.type == "zero_or_more":
                     tool_config["toolChoice"] = ToolChoiceTypeDef(auto={})
                 elif tc.type == "one_or_more":
@@ -1660,7 +1692,8 @@ class BedrockClient(PlaygroundClient["BedrockRuntimeClient"]):
                 elif TYPE_CHECKING:
                     assert_never(tc.type)
 
-            request["toolConfig"] = tool_config
+            if send_tools:
+                request["toolConfig"] = tool_config
 
         if response_format:
             json_schema = JsonSchemaDefinitionTypeDef(
@@ -2110,11 +2143,17 @@ def _anthropic_beta_headers_for_tools(
     return {"anthropic-beta": ",".join(betas)}
 
 
+# `messages.create()` accepts no sampling parameters. `extra_body` merges them into
+# the request JSON, which is how the models that support them receive them.
+_ANTHROPIC_SAMPLING_PARAM_KEYS = frozenset(("temperature", "top_p"))
+
+
 # Anthropic models that use adaptive thinking (`thinking: {"type": "adaptive"}`).
 # These models removed `temperature`, `top_p`, `top_k`, and extended thinking
 # (`thinking: {"type": "enabled", "budget_tokens": N}`) from their request
 # surface; sending any of them returns a 400.
 ANTHROPIC_ADAPTIVE_THINKING_MODELS = [
+    "claude-fable-5-1",
     "claude-fable-5",
     "claude-opus-5",
     "claude-opus-4-8",
@@ -2236,7 +2275,7 @@ class AnthropicClient(PlaygroundClient["AsyncAnthropic"]):
                     params["tool_choice"] = choice_tool
                 else:
                     assert_never(tc.type)
-            if tools.disable_parallel_tool_calls:
+            elif tools.disable_parallel_tool_calls:
                 params["tool_choice"] = ToolChoiceAutoParam(
                     type="auto", disable_parallel_tool_use=True
                 )
@@ -2254,6 +2293,8 @@ class AnthropicClient(PlaygroundClient["AsyncAnthropic"]):
                     )
                     if f.description:
                         t["description"] = f.description
+                    if isinstance(f.strict, bool):
+                        t["strict"] = f.strict
                     tool_list.append(t)
                 params["tools"] = tool_list
                 extra_headers = _anthropic_beta_headers_for_tools(tool_list)
@@ -2274,12 +2315,14 @@ class AnthropicClient(PlaygroundClient["AsyncAnthropic"]):
         extra_body: dict[str, Any] | None = None
         if invocation_parameters:
             anthropic_params = invocation_parameters.anthropic
+            # Sampling parameters reach the request JSON through `extra_body`.
+            sampling_params: dict[str, Any] = {}
             if isinstance(anthropic_params.temperature, float):
-                params["temperature"] = anthropic_params.temperature
+                sampling_params["temperature"] = anthropic_params.temperature
             if isinstance(anthropic_params.stop_sequences, list):
                 params["stop_sequences"] = anthropic_params.stop_sequences
             if isinstance(anthropic_params.top_p, float):
-                params["top_p"] = anthropic_params.top_p
+                sampling_params["top_p"] = anthropic_params.top_p
             output_config_in = anthropic_params.output_config
             if isinstance(output_config_in, PromptAnthropicOutputConfig):
                 if output_config is None:
@@ -2302,8 +2345,11 @@ class AnthropicClient(PlaygroundClient["AsyncAnthropic"]):
                 if thinking.display:
                     adaptive_param["display"] = thinking.display
                 params["thinking"] = adaptive_param
+            # A configured `extra_body` overrides the sampling parameters above.
             if isinstance(anthropic_params.extra_body, dict):
-                extra_body = anthropic_params.extra_body
+                extra_body = {**sampling_params, **anthropic_params.extra_body}
+            elif sampling_params:
+                extra_body = sampling_params
 
         if output_config is not None:
             params["output_config"] = output_config
@@ -2321,7 +2367,15 @@ class AnthropicClient(PlaygroundClient["AsyncAnthropic"]):
                 span.set_attribute(f"llm.tools.{i}.tool.json_schema", safe_json_dumps(tool_param))
         input_value: dict[str, Any] = dict(params)
         if extra_body:
-            input_value["extra_body"] = extra_body
+            # Sampling parameters are top-level fields on the wire, so record them as
+            # such; the nested entry is for keys the caller asked to pass through.
+            input_value.update(
+                {k: v for k, v in extra_body.items() if k in _ANTHROPIC_SAMPLING_PARAM_KEYS}
+            )
+            if passthrough := {
+                k: v for k, v in extra_body.items() if k not in _ANTHROPIC_SAMPLING_PARAM_KEYS
+            }:
+                input_value["extra_body"] = passthrough
         span.set_attribute(SpanAttributes.INPUT_VALUE, safe_json_dumps(input_value))
         span.set_attribute(SpanAttributes.INPUT_MIME_TYPE, OpenInferenceMimeTypeValues.JSON.value)
         input_value.pop("messages", None)
@@ -2958,6 +3012,8 @@ class GoogleClient(PlaygroundClient["GoogleAsyncClient"]):
 
 
 GEMINI_3_MODELS = [
+    "gemini-3.8-flash",
+    "gemini-3.7-flash",
     "gemini-3.6-flash",
     "gemini-3.5-flash",
     "gemini-3.5-flash-lite",
@@ -3021,19 +3077,27 @@ LLM_TOKEN_COUNT_COMPLETION_DETAILS_AUDIO = SpanAttributes.LLM_TOKEN_COUNT_COMPLE
 
 
 class _HttpxClient(wrapt.ObjectProxy):  # type: ignore
+    """Records the outgoing request URL on the span without altering the request.
+
+    Provider SDKs disagree on their HTTP library: the openai SDK is built on httpx2, the
+    others on httpx. Both are accepted because only ``request.url`` is read.
+    """
+
     def __init__(
         self,
-        wrapped: httpx.AsyncClient,
+        wrapped: httpx.AsyncClient | httpx2.AsyncClient,
         span: OTelSpan,
     ):
         super().__init__(wrapped)
         self._self_span = span
 
-    async def send(self, request: httpx.Request, **kwargs: Any) -> httpx.Response:
+    async def send(
+        self, request: httpx.Request | httpx2.Request, **kwargs: Any
+    ) -> httpx.Response | httpx2.Response:
         self._self_span.set_attribute(URL_FULL, str(request.url))
         self._self_span.set_attribute(URL_PATH, request.url.path.removeprefix(self.base_url.path))
         response = await self.__wrapped__.send(request, **kwargs)
-        return cast(httpx.Response, response)
+        return cast("httpx.Response | httpx2.Response", response)
 
 
 CustomProviderId: TypeAlias = int
@@ -3894,6 +3958,46 @@ async def _get_builtin_provider_client(
 
         client_factory = LLMClientFactory(
             create_together_client, openai_rate_limit_key(api_key, base_url)
+        )
+        return OpenAIChatCompletionsClient(
+            client_factory=client_factory,
+            model_name=model_name,
+            provider=provider,
+        )
+
+    elif provider_key == GenerativeProviderKey.ZAI:
+        try:
+            from openai import AsyncOpenAI
+        except ImportError:
+            raise BadRequest("OpenAI package not installed. Run: pip install openai")
+
+        api_key = await _resolve_provider_api_key(
+            credentials=credentials,
+            session=session,
+            decrypt=decrypt,
+            env_var_name="ZAI_API_KEY",
+            client_base_url=client_base_url,
+            provider_label="Z.ai",
+        )
+        base_url = base_url or getenv("ZAI_BASE_URL") or "https://api.z.ai/api/paas/v4"
+
+        if not api_key:
+            if base_url.startswith("https://api.z.ai/"):
+                raise BadRequest(
+                    "An API key is required for Z.ai models. "
+                    "Set the ZAI_API_KEY environment variable or use a custom provider."
+                )
+            api_key = "sk-placeholder"
+
+        def create_zai_client() -> AsyncOpenAI:
+            return AsyncOpenAI(
+                api_key=api_key,
+                base_url=base_url,
+                default_headers=headers,
+            )
+
+        client_factory = LLMClientFactory(
+            create_zai_client, openai_rate_limit_key(api_key, base_url)
         )
         return OpenAIChatCompletionsClient(
             client_factory=client_factory,

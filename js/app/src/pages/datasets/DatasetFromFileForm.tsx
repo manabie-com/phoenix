@@ -238,6 +238,7 @@ const rowCountCSS = css`
  * Shows a large dropzone when no file is selected, then reveals
  * the full form with file preview and column assignment.
  */
+// oxlint-disable-next-line complexity -- File parsing, preview, and submission share one form lifecycle.
 export function DatasetFromFileForm(props: DatasetFromFileFormProps) {
   const { onCancel, mode } = props;
   const [pendingAction, setPendingAction] = useState<
@@ -278,6 +279,7 @@ export function DatasetFromFileForm(props: DatasetFromFileFormProps) {
     },
   });
 
+  // eslint-disable-next-line react/incompatible-library
   const selectedFile = watch("file");
   const inputKeys = watch("input_keys");
   const outputKeys = watch("output_keys");

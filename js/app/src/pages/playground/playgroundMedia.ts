@@ -266,16 +266,23 @@ type LayoutMessage = {
  *   to it invalidates positions recorded against what it used to say. Falling back then
  *   sends the edited text followed by the attachments, which is what the editor shows.
  */
-const placedContentParts = (
+/**
+ * Walks the recorded layout once, placing each part in order.
+ *
+ * Split out of {@link placedContentParts} purely to keep each function's
+ * branching below the linter's complexity ceiling — the two halves (walk the
+ * layout; decide whether the walk's result is still usable) don't share any
+ * control flow, so splitting them changes nothing about behavior.
+ */
+const layOutContentParts = (
+  layout: ContentLayoutPart[],
   message: LayoutMessage
-): (TextContentPartInput | MediaContentPartInput)[] | null => {
-  const layout = message.contentLayout;
-  if (layout == null || layout.length === 0) {
-    return null;
-  }
-  if (message.imageVariables?.length || message.fileVariables?.length) {
-    return null;
-  }
+): {
+  parts: (TextContentPartInput | MediaContentPartInput)[];
+  texts: string[];
+  placedImages: number;
+  placedFiles: number;
+} | null => {
   const parts: (TextContentPartInput | MediaContentPartInput)[] = [];
   const texts: string[] = [];
   let nextImage = 0;
@@ -300,9 +307,27 @@ const placedContentParts = (
     }
     parts.push({ file: { url: held.url, mediaType: held.mediaType } });
   }
+  return { parts, texts, placedImages: nextImage, placedFiles: nextFile };
+};
+
+const placedContentParts = (
+  message: LayoutMessage
+): (TextContentPartInput | MediaContentPartInput)[] | null => {
+  const layout = message.contentLayout;
+  if (layout == null || layout.length === 0) {
+    return null;
+  }
+  if (message.imageVariables?.length || message.fileVariables?.length) {
+    return null;
+  }
+  const laidOut = layOutContentParts(layout, message);
+  if (laidOut == null) {
+    return null;
+  }
+  const { parts, texts, placedImages, placedFiles } = laidOut;
   if (
-    nextImage !== (message.images?.length ?? 0) ||
-    nextFile !== (message.files?.length ?? 0)
+    placedImages !== (message.images?.length ?? 0) ||
+    placedFiles !== (message.files?.length ?? 0)
   ) {
     return null;
   }

@@ -1,24 +1,75 @@
 import { css } from "@emotion/react";
 import { useMemo } from "react";
-import { useRouteError } from "react-router";
+import { isRouteErrorResponse, useRouteError } from "react-router";
 
-import { Button, ExternalLink, Flex } from "@phoenix/components";
+import {
+  isRedirectingToLogin,
+  isRedirectingToLoginError,
+} from "@phoenix/authFetch";
+import { Button, ExternalLink, Flex, Loading } from "@phoenix/components";
 import { isConnectionTimeoutError } from "@phoenix/components/exception/isConnectionTimeoutError";
+
+import { NotFoundContent, ProjectOnboardingNotFound } from "./NotFound";
+import type { NotFoundErrorData } from "./redirects/notFound";
 
 export function ErrorElement() {
   const error = useRouteError();
 
+  const is404 = isRouteErrorResponse(error) && error.status === 404;
+  let notFoundData: NotFoundErrorData | undefined;
+  if (isRouteErrorResponse(error) && error.status === 404) {
+    notFoundData = error.data;
+  }
+
   const content = useMemo(() => {
+    if (is404) {
+      if (notFoundData?.kind === "project-onboarding") {
+        return (
+          <ProjectOnboardingNotFound projectName={notFoundData.projectName} />
+        );
+      }
+      return (
+        <NotFoundContent
+          entityType={notFoundData?.entityType}
+          identifier={notFoundData?.identifier}
+        />
+      );
+    }
     if (error instanceof Error && error.message === "Failed to fetch") {
       // We know this means the server disconnected
-      return <NotFoundContent />;
+      return <ServerDisconnectedContent />;
     }
     if (error instanceof Error && isConnectionTimeoutError(error)) {
       // Load balancer or proxy timed out before server could respond
       return <ConnectionTimeoutContent />;
     }
     return <ErrorContent error={error} />;
-  }, [error]);
+  }, [error, is404, notFoundData]);
+
+  if (isRedirectingToLoginError(error) || isRedirectingToLogin()) {
+    // The browser is already navigating to the login page; show a single
+    // neutral pending state instead of an error page while the handoff
+    // completes. The flag check also covers errors from fetches interrupted
+    // by that navigation, which some browsers reject with a generic error
+    // rather than an AbortError.
+    return <Loading />;
+  }
+
+  if (notFoundData?.kind === "project-onboarding") {
+    return (
+      <main
+        css={css`
+          width: 100%;
+          height: 100%;
+          display: flex;
+          flex-direction: column;
+        `}
+      >
+        {content}
+      </main>
+    );
+  }
+
   return (
     <main
       css={css`
@@ -45,7 +96,7 @@ export function ErrorElement() {
   );
 }
 
-function NotFoundContent() {
+function ServerDisconnectedContent() {
   return (
     <>
       <Flex direction="column" width="100%" alignItems="center">
