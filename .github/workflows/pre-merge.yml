@@ -67,7 +67,7 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  UV_VERSION: "0.12.5"
+  UV_VERSION: "0.12.7"
   # fake openai key so that llama_index doesn't download huggingface embeddings
   OPENAI_API_KEY: "sk-fake-openai-key"
 
