@@ -21,7 +21,7 @@ const llmAttributes = (
   provider: "google",
   inputMessages,
   outputMessages: [],
-  toolSchemas: [],
+  tools: [],
   prompts: [],
   promptTemplate: null,
   invocationParameters: "{}",

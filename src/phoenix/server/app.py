@@ -132,12 +132,21 @@ from phoenix.server.email.types import EmailSender
 from phoenix.server.encryption import EncryptionService
 from phoenix.server.grpc_server import GrpcServer
 from phoenix.server.jwt_store import JwtStore
+from phoenix.server.mcp.skills import PXI_SKILLS_ROOTS
+from phoenix.server.mcp_server import (
+    MCP_MOUNT_PATH,
+    BearerAuthGuard,
+    MountPathNormalizer,
+    build_phoenix_mcp_server,
+    create_phoenix_mcp_app,
+)
 from phoenix.server.middleware.anonymous_cors import (
     AnonymousCorsMiddleware,
     AnonymousPaths,
     anonymous_paths,
 )
 from phoenix.server.middleware.gzip import GZipMiddleware
+from phoenix.server.middleware.js_sandbox_worker_csp import JSSandboxWorkerCSPMiddleware
 from phoenix.server.monty_runtime import MontyRuntime
 from phoenix.server.oauth2 import OAuth2Clients
 from phoenix.server.oauth2_authorization_server import public_origin
@@ -241,6 +250,8 @@ class AppConfig(NamedTuple):
     auth_error_messages: dict[AuthErrorCode, str]
     """ Mapping of auth error codes to user-friendly messages """
     oauth2_idps: Sequence[OAuth2Idp]
+    password_reset_email_enabled: bool = False
+    """ Whether password reset emails can be sent """
     basic_auth_disabled: bool = False
     ldap_enabled: bool = False
     """ Whether LDAP authentication is configured """
@@ -327,6 +338,7 @@ class Static(StaticFiles):
                     "manifest": self._web_manifest,
                     "authentication_enabled": self._app_config.authentication_enabled,
                     "oauth2_idps": self._app_config.oauth2_idps,
+                    "password_reset_email_enabled": self._app_config.password_reset_email_enabled,
                     "basic_auth_disabled": self._app_config.basic_auth_disabled,
                     "ldap_enabled": self._app_config.ldap_enabled,
                     "ldap_manual_user_creation_enabled": self._app_config.ldap_manual_user_creation_enabled,  # noqa: E501
@@ -709,12 +721,12 @@ def _lifespan(
                         "Failed to initialize docs MCP server; continuing without docs capability.",
                         exc_info=True,
                     )
-            # Probe the shared runtime once when either consumer can use it.
+            # Probe the shared runtime once when any consumer can use it.
             # Failure is non-fatal because Monty is an optional server feature.
-            if (
-                getattr(app.state, "mcp_code_mode_sandbox", None) is not None
-                or "MONTY" in get_env_allowed_sandbox_providers()
-            ):
+            mounted_mcp_code_mode = getattr(app.state, "mcp_code_mode_sandbox", None) is not None
+            agent_mcp_code_mode = getattr(app.state, "pxi_mcp_sandbox", None) is not None
+            monty_allowed_by_config = "MONTY" in get_env_allowed_sandbox_providers()
+            if mounted_mcp_code_mode or agent_mcp_code_mode or monty_allowed_by_config:
                 try:
                     await sandbox_runtime.monty.probe_runtime()
                 except Exception:
@@ -963,12 +975,9 @@ def create_app(
     # Resolved before the middleware stack: the anonymous-surface path set feeds
     # both the CSRF origin validator below and AnonymousCorsMiddleware at the end
     # of this function, and it depends on whether the MCP endpoint is mounted
-    # (the mount itself happens after the routers). The import stays deferred so
-    # fastmcp is only loaded when the mount is enabled.
+    # (the mount itself happens after the routers).
     mcp_mount_path: Optional[str] = None
     if get_env_enable_mcp_server():
-        from phoenix.server.mcp_server import MCP_MOUNT_PATH
-
         mcp_mount_path = MCP_MOUNT_PATH
     anonymous_surfaces = anonymous_paths(mcp_mount_path)
     middlewares: list[Middleware] = [
@@ -1208,12 +1217,6 @@ def create_app(
         # the same /v1 schema, and mount before the static UI ("/") catch-all so
         # requests to the MCP endpoint are not swallowed by it. The app's
         # lifespan (its session manager) is entered in ``_lifespan`` above.
-        from phoenix.server.mcp_server import (
-            BearerAuthGuard,
-            MountPathNormalizer,
-            create_phoenix_mcp_app,
-        )
-
         mcp_http_app, mcp_code_mode_sandbox = create_phoenix_mcp_app(
             app,
             monty_runtime=sandbox_runtime.monty,
@@ -1235,6 +1238,25 @@ def create_app(
     # Consumed by the OAuth2 authorization server (resource-indicator validation)
     # and the protected-resource metadata routes; None when the mount is disabled.
     app.state.mcp_mount_path = mcp_mount_path
+    # The agent's own instance, independent of the mount and its configuration.
+    # Read-only: mutations belong to the agent's editing tools, which route
+    # approval through the user. Its sandbox takes the ``agent`` admission class,
+    # capped one below the worker pool size: consumers compete for workers and a
+    # loser waits at checkout, but no consumer can hold them all.
+    pxi_mcp_server = None
+    pxi_mcp_sandbox = None
+    if not get_env_disable_agent_assistant():
+        pxi_mcp_server, pxi_mcp_sandbox = build_phoenix_mcp_server(
+            app,
+            monty_runtime=sandbox_runtime.monty,
+            code_mode=True,
+            monty_consumer="agent",
+            read_only=True,
+            db=db,
+            skills_roots=PXI_SKILLS_ROOTS,
+        )
+    app.state.pxi_mcp_server = pxi_mcp_server
+    app.state.pxi_mcp_sandbox = pxi_mcp_sandbox
     app.add_middleware(GZipMiddleware)
     static_dir = SERVER_DIR / "static"
     web_manifest_path = static_dir / ".vite" / "manifest.json"
@@ -1264,6 +1286,7 @@ def create_app(
                     authentication_enabled=authentication_enabled,
                     web_manifest_path=web_manifest_path,
                     oauth2_idps=oauth2_idps,
+                    password_reset_email_enabled=email_sender is not None,
                     basic_auth_disabled=basic_auth_disabled,
                     ldap_enabled=ldap_config is not None,
                     # Disable manual user creation when LDAP disabled or no email attr
@@ -1318,6 +1341,10 @@ def create_app(
     app.state.sandbox_session_manager = sandbox_session_manager
     app.state.sandbox_runtime = sandbox_runtime
     app.state.graphql_schema = graphql_schema
+    # Snapshot the provider allow-list once at app creation so the REST and
+    # GraphQL surfaces answer from the same (startup-validated) value.
+    allowed_provider_names = get_env_allowed_providers()
+    app.state.allowed_provider_names = allowed_provider_names
     app.state.build_graphql_context = _get_build_graphql_context_function(
         db=db,
         system_settings=system_settings,
@@ -1330,7 +1357,7 @@ def create_app(
         cache_for_dataloaders=cache_for_dataloaders,
         last_updated_at=last_updated_at,
         event_queue=dml_event_handler,
-        allowed_provider_names=get_env_allowed_providers(),
+        allowed_provider_names=allowed_provider_names,
         read_only=read_only,
         authentication_enabled=authentication_enabled,
         secret=secret,
@@ -1370,6 +1397,10 @@ def create_app(
         paths=anonymous_surfaces,
         expose_headers="Mcp-Session-Id, WWW-Authenticate" if mcp_mount_path is not None else "",
     )
+    # Sandboxes execute_browser_action scripts at the platform level: a worker adopts the
+    # CSP of its script response, so the worker asset gets connect-src 'none'
+    # (see the middleware's docstring).
+    app.add_middleware(JSSandboxWorkerCSPMiddleware)
     return app
 
 

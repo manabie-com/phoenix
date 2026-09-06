@@ -104,6 +104,7 @@ export function LoginForm(props: LoginFormProps) {
                   name="email"
                   isRequired
                   type="email"
+                  autoFocus
                   onChange={onChange}
                   onBlur={onBlur}
                   value={value}
@@ -143,15 +144,23 @@ export function LoginForm(props: LoginFormProps) {
                     onChange={onChange}
                     value={value}
                     autoComplete="current-password"
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") {
+                        e.preventDefault();
+                        void handleSubmit(onSubmit)();
+                      }
+                    }}
                   >
                     <Label>Password</Label>
                     <Input placeholder="your password" />
                   </TextField>
                 )}
               />
-              <Link id="forgot-password-link" to="/forgot-password">
-                Forgot your password?
-              </Link>
+              {window.Config.passwordResetEmailEnabled ? (
+                <Link id="forgot-password-link" to="/forgot-password">
+                  Forgot your password?
+                </Link>
+              ) : null}
             </div>
           </Flex>
           <Button

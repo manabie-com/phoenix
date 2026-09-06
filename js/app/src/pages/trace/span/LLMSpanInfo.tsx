@@ -24,7 +24,7 @@ export function LLMSpanInfo({
     provider,
     inputMessages,
     outputMessages,
-    toolSchemas,
+    tools,
     prompts,
     promptTemplate,
     invocationParameters,
@@ -40,7 +40,7 @@ export function LLMSpanInfo({
           provider={provider}
           input={input}
           inputMessages={inputMessages}
-          toolSchemas={toolSchemas}
+          tools={tools}
           promptTemplate={promptTemplate}
           prompts={prompts}
           invocationParameters={invocationParameters}

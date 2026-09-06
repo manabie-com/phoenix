@@ -276,6 +276,32 @@ const placedContentParts = (
   if (message.imageVariables?.length || message.fileVariables?.length) {
     return null;
   }
+  return layOutContentParts(layout, message);
+};
+
+/**
+ * A media part held at `index`, or `null` if it is missing or out of the order the
+ * layout claims — the two ways a recorded position can stop describing the message.
+ *
+ * A type predicate so the caller's early return also narrows `held` to non-null,
+ * matching the plain `held == null` check it replaces.
+ */
+const isPlacedInOrder = <T>(
+  held: T | null | undefined,
+  index: number,
+  expected: number
+): held is T => held != null && index === expected;
+
+/**
+ * Walks a message's recorded layout, building its content parts in order.
+ *
+ * Split out from {@link placedContentParts} so that function's own body stays just its
+ * early-exit guards — the walk itself is one loop with its own branches per part kind.
+ */
+const layOutContentParts = (
+  layout: NonNullable<LayoutMessage["contentLayout"]>,
+  message: LayoutMessage
+): (TextContentPartInput | MediaContentPartInput)[] | null => {
   const parts: (TextContentPartInput | MediaContentPartInput)[] = [];
   const texts: string[] = [];
   let nextImage = 0;
@@ -288,14 +314,14 @@ const placedContentParts = (
     }
     if ("image" in part) {
       const held = message.images?.[part.image]?.image;
-      if (held == null || part.image !== nextImage++) {
+      if (!isPlacedInOrder(held, part.image, nextImage++)) {
         return null;
       }
       parts.push({ image: { url: held.url, mediaType: held.mediaType } });
       continue;
     }
     const held = message.files?.[part.file]?.file;
-    if (held == null || part.file !== nextFile++) {
+    if (!isPlacedInOrder(held, part.file, nextFile++)) {
       return null;
     }
     parts.push({ file: { url: held.url, mediaType: held.mediaType } });
