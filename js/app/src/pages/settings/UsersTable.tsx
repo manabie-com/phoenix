@@ -72,8 +72,9 @@ const userTableRowCSS = css`
  * Container for the users table with scrolling
  */
 const usersTableContainerCSS = css`
+  flex: 1 1 auto;
+  min-height: 0;
   overflow: auto;
-  max-height: var(--global-dimension-size-6000);
 `;
 
 const isDefaultAdminUser = (user: { email: string | null; username: string }) =>
@@ -282,7 +283,7 @@ export function UsersTable({ query }: { query: UsersTable_users$key }) {
     ];
   }, [viewer]);
 
-  // eslint-disable-next-line react-hooks-js/incompatible-library
+  // eslint-disable-next-line react/incompatible-library
   const table = useReactTable<TableRow>({
     columns,
     data: tableData,

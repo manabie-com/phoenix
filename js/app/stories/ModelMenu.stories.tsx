@@ -43,7 +43,15 @@ export default meta;
 
 const MODELS_BY_PROVIDER = new Map<string, string[]>([
   ["OPENAI", ["gpt-5.6-luna", "gpt-5.6-sol", "gpt-5.4-mini"]],
-  ["ANTHROPIC", ["claude-fable-5", "claude-sonnet-4-6", "claude-haiku-4-5"]],
+  [
+    "ANTHROPIC",
+    [
+      "claude-fable-5-1",
+      "claude-fable-5",
+      "claude-sonnet-4-6",
+      "claude-haiku-4-5",
+    ],
+  ],
   ["AZURE_OPENAI", ["gpt-5.6-luna", "gpt-5.4-mini"]],
   [
     "AWS",
@@ -52,7 +60,10 @@ const MODELS_BY_PROVIDER = new Map<string, string[]>([
       "meta.llama3-1-70b-instruct-v1:0",
     ],
   ],
-  ["GOOGLE", ["gemini-3.1-pro-preview", "gemini-3.5-flash"]],
+  [
+    "GOOGLE",
+    ["gemini-3.7-flash", "gemini-3.1-pro-preview", "gemini-3.5-flash"],
+  ],
 ]);
 
 const provider = ({

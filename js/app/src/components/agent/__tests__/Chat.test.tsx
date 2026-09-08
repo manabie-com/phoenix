@@ -141,6 +141,9 @@ function renderChatView(
               forceTracing: false,
               webAccessEnabled: false,
               assistantEnabled: true,
+              githubServerEnabled: false,
+              githubEnabled: false,
+              githubWorkspaceTokenConfigured: false,
               allowLocalTraces: true,
               allowRemoteExport: false,
               sessionRetentionMaxIdleDays: 30,
@@ -156,7 +159,6 @@ function renderChatView(
               },
             }}
             capabilities={{
-              "graphql.mutations": false,
               "subagents.enabled": false,
               "web.access": false,
             }}
