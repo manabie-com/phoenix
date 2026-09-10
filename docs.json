@@ -221,6 +221,7 @@
                       "docs/phoenix/evaluation/pre-built-metrics",
                       "docs/phoenix/evaluation/pre-built-metrics/faithfulness",
                       "docs/phoenix/evaluation/pre-built-metrics/hallucination",
+                      "docs/phoenix/evaluation/pre-built-metrics/completeness",
                       "docs/phoenix/evaluation/pre-built-metrics/conciseness",
                       "docs/phoenix/evaluation/pre-built-metrics/correctness",
                       "docs/phoenix/evaluation/pre-built-metrics/retrieval-relevance",
@@ -291,6 +292,7 @@
               {
                 "group": "Integrations",
                 "pages": [
+                  "docs/phoenix/integrations/evaluation-integrations/harbor",
                   "docs/phoenix/evaluation/integrations/pytest",
                   "docs/phoenix/evaluation/integrations/vitest-jest"
                 ]
@@ -901,6 +903,7 @@
             "group": "Evaluation Integrations",
             "icon": "clipboard-check",
             "pages": [
+              "docs/phoenix/integrations/evaluation-integrations/harbor",
               "docs/phoenix/integrations/evaluation-integrations/cleanlab",
               "docs/phoenix/integrations/evaluation-integrations/mlflow",
               "docs/phoenix/integrations/evaluation-integrations/ragas",
