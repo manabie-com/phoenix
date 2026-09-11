@@ -7,6 +7,7 @@ import {
   getLLMAttributes,
   getMessagePreview,
   getPromptTemplatePreview,
+  getReasoningPreview,
   getRerankerAttributes,
   getRetrieverAttributes,
   getToolAttributes,
@@ -186,6 +187,63 @@ describe("getMessagePreview", () => {
         ],
       })
     ).toBe("what is in this image?");
+  });
+
+  // the header is for telling turns apart, and the thinking behind an answer
+  // would crowd the answer out of it
+  it("quotes the answer rather than the reasoning that preceded it", () => {
+    expect(
+      getMessagePreview({
+        role: "assistant",
+        contents: [
+          {
+            message_content: {
+              type: "reasoning",
+              id: "rs_1",
+              text: "**Weighing the options** Six hours is 360 minutes.",
+            },
+          },
+          { message_content: { type: "text", text: "360 minutes." } },
+        ],
+      })
+    ).toBe("360 minutes.");
+  });
+
+  // a replayed thinking turn carries nothing else; previewing its summary is
+  // better than a bare role header
+  it("falls back to the reasoning summary when the turn has nothing else", () => {
+    expect(
+      getMessagePreview({
+        role: "assistant",
+        contents: [
+          {
+            message_content: {
+              type: "reasoning",
+              text: "**Weighing the options** Six hours is 360 minutes.",
+            },
+          },
+        ],
+      })
+    ).toBe("**Weighing the options** Six hours is 360 minutes.");
+  });
+
+  // OpenAI returns reasoning encrypted unless a summary is requested, so the
+  // card has nothing to quote and should stay expanded to show the block
+  it("has no preview for an encrypted-only reasoning turn", () => {
+    expect(
+      getMessagePreview({
+        role: "assistant",
+        contents: [
+          {
+            message_content: {
+              type: "reasoning",
+              id: "rs_1",
+              encrypted_content: "gAAAAABqmxPv…",
+            },
+          },
+        ],
+      })
+    ).toBeUndefined();
   });
 
   it("falls back to the content, then to the tool calls", () => {
@@ -436,5 +494,27 @@ describe("groupDocumentEvaluationsByPosition", () => {
 
   it("returns an empty map for no evaluations", () => {
     expect(groupDocumentEvaluationsByPosition([])).toEqual({});
+  });
+});
+
+describe("getReasoningPreview", () => {
+  it("quotes the first heading without its bold markers", () => {
+    expect(
+      getReasoningPreview(
+        "**Weighing the options**\n\nSix hours is 360 minutes."
+      )
+    ).toBe("Weighing the options Six hours is 360 minutes.");
+  });
+
+  it("drops heading marks and inline code ticks", () => {
+    expect(getReasoningPreview("## Plan\n\nCall `lookup` first.")).toBe(
+      "Plan Call lookup first."
+    );
+  });
+
+  it("keeps emphasis text and arithmetic that only looks like emphasis", () => {
+    expect(getReasoningPreview("So _t_ is 6 and 60*t = 90*(t-2).")).toBe(
+      "So t is 6 and 60*t = 90*(t-2)."
+    );
   });
 });

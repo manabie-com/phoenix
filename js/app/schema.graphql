@@ -663,6 +663,7 @@ type ChatCompletionSubscriptionResult implements ChatCompletionSubscriptionPaylo
 
 input ChatPromptVersionInput {
   description: String = null
+  metadata: JSON
   templateFormat: PromptTemplateFormat!
   template: PromptChatTemplateInput!
   invocationParameters: PromptInvocationParametersInput!
@@ -2439,6 +2440,7 @@ enum GenerativeProviderKey {
   PERPLEXITY
   TOGETHER
   ZAI
+  META
 }
 
 type GoogleGenAIAuthenticationMethod {
@@ -2623,6 +2625,7 @@ enum ModelProvider {
   PERPLEXITY
   TOGETHER
   ZAI
+  META
 }
 
 input ModelsInput {
@@ -4386,6 +4389,9 @@ type Span implements Node {
   containedInDataset: Boolean!
   costSummary: SpanCostSummary
   costDetailSummaryEntries: [SpanCostDetailSummaryEntry!]!
+
+  """Cost details aggregated from this span and all descendant spans"""
+  cumulativeCostDetailSummaryEntries: [SpanCostDetailSummaryEntry!]!
 }
 
 type SpanAnnotation implements Node & Annotation {
