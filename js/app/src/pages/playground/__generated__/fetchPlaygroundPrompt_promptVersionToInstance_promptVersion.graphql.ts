@@ -1,5 +1,5 @@
 /**
- * @generated SignedSource<<6a418c7ca1c7b3e307dcb6455d51ab80>>
+ * @generated SignedSource<<abe6a294c1f788a8958b1e7204166de6>>
  * @lightSyntaxTransform
  */
 
@@ -8,7 +8,7 @@
 // @ts-nocheck
 
 import { ReaderInlineDataFragment } from 'relay-runtime';
-export type ModelProvider = "ANTHROPIC" | "AWS" | "AZURE_OPENAI" | "CEREBRAS" | "DEEPSEEK" | "FIREWORKS" | "GOOGLE" | "GROQ" | "MINIMAX" | "MOONSHOT" | "OLLAMA" | "OPENAI" | "PERPLEXITY" | "TOGETHER" | "XAI" | "ZAI";
+export type ModelProvider = "ANTHROPIC" | "AWS" | "AZURE_OPENAI" | "CEREBRAS" | "DEEPSEEK" | "FIREWORKS" | "GOOGLE" | "GROQ" | "META" | "MINIMAX" | "MOONSHOT" | "OLLAMA" | "OPENAI" | "PERPLEXITY" | "TOGETHER" | "XAI" | "ZAI";
 export type PromptMessageRole = "AI" | "SYSTEM" | "TOOL" | "USER";
 export type PromptToolChoiceType = "NONE" | "ONE_OR_MORE" | "SPECIFIC_FUNCTION" | "ZERO_OR_MORE";
 import { FragmentRefs } from "relay-runtime";
@@ -35,22 +35,29 @@ export type fetchPlaygroundPrompt_promptVersionToInstance_promptVersion$data = {
     readonly __typename: "PromptChatTemplate";
     readonly messages: ReadonlyArray<{
       readonly content: ReadonlyArray<{
-        readonly __typename: string;
-        readonly text?: {
+        readonly __typename: "TextContentPart";
+        readonly text: {
           readonly text: string;
         };
-        readonly toolCall?: {
+      } | {
+        readonly __typename: "ToolCallContentPart";
+        readonly toolCall: {
           readonly toolCall: {
             readonly arguments: string;
             readonly name: string;
           };
           readonly toolCallId: string;
         };
-        readonly toolResult?: {
+      } | {
+        readonly __typename: "ToolResultContentPart";
+        readonly toolResult: {
           readonly result: any;
           readonly toolCallId: string;
         };
-        readonly " $fragmentSpreads": FragmentRefs<"mediaContentPartFragment">;
+      } | {
+        // This will never be '%other', but we need some
+        // value in case none of the concrete values match.
+        readonly __typename: "%other";
       }>;
       readonly role: PromptMessageRole;
     }>;
@@ -97,6 +104,6 @@ const node: ReaderInlineDataFragment = {
   "name": "fetchPlaygroundPrompt_promptVersionToInstance_promptVersion"
 };
 
-(node as any).hash = "eeb524887f846aa475c11f76161710c6";
+(node as any).hash = "7e4c7139f27764907b329345e0b2dabc";
 
 export default node;

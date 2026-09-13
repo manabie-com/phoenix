@@ -1,5 +1,5 @@
 /**
- * @generated SignedSource<<2566f5232d02f37922968d62929c8634>>
+ * @generated SignedSource<<bae67214fd0af8b87fe9a57d6c06504f>>
  * @lightSyntaxTransform
  */
 
@@ -9,7 +9,7 @@
 
 import { ReaderFragment } from 'relay-runtime';
 export type EvaluatorKind = "BUILTIN" | "CODE" | "LLM";
-export type ModelProvider = "ANTHROPIC" | "AWS" | "AZURE_OPENAI" | "CEREBRAS" | "DEEPSEEK" | "FIREWORKS" | "GOOGLE" | "GROQ" | "MINIMAX" | "MOONSHOT" | "OLLAMA" | "OPENAI" | "PERPLEXITY" | "TOGETHER" | "XAI" | "ZAI";
+export type ModelProvider = "ANTHROPIC" | "AWS" | "AZURE_OPENAI" | "CEREBRAS" | "DEEPSEEK" | "FIREWORKS" | "GOOGLE" | "GROQ" | "META" | "MINIMAX" | "MOONSHOT" | "OLLAMA" | "OPENAI" | "PERPLEXITY" | "TOGETHER" | "XAI" | "ZAI";
 export type OptimizationDirection = "MAXIMIZE" | "MINIMIZE" | "NONE";
 import { FragmentRefs } from "relay-runtime";
 export type LLMDatasetEvaluatorDetails_datasetEvaluator$data = {
@@ -182,52 +182,14 @@ v15 = {
   "name": "strict",
   "storageKey": null
 },
-v16 = [
-  (v5/*:: as any*/),
-  {
-    "kind": "InlineFragment",
-    "selections": [
-      {
-        "alias": null,
-        "args": null,
-        "kind": "ScalarField",
-        "name": "url",
-        "storageKey": null
-      },
-      {
-        "alias": null,
-        "args": null,
-        "kind": "ScalarField",
-        "name": "mediaType",
-        "storageKey": null
-      }
-    ],
-    "type": "ImageContentValue",
-    "abstractKey": null
-  },
-  {
-    "kind": "InlineFragment",
-    "selections": [
-      {
-        "alias": null,
-        "args": null,
-        "kind": "ScalarField",
-        "name": "variable",
-        "storageKey": null
-      }
-    ],
-    "type": "ImageVariableValue",
-    "abstractKey": null
-  }
-],
-v17 = {
+v16 = {
   "alias": null,
   "args": null,
   "kind": "ScalarField",
   "name": "toolCallId",
   "storageKey": null
 },
-v18 = {
+v17 = {
   "alias": null,
   "args": null,
   "kind": "ScalarField",
@@ -697,48 +659,6 @@ return {
                                       "abstractKey": null
                                     },
                                     {
-                                      "kind": "InlineDataFragmentSpread",
-                                      "name": "mediaContentPartFragment",
-                                      "selections": [
-                                        {
-                                          "kind": "InlineFragment",
-                                          "selections": [
-                                            {
-                                              "alias": null,
-                                              "args": null,
-                                              "concreteType": null,
-                                              "kind": "LinkedField",
-                                              "name": "image",
-                                              "plural": false,
-                                              "selections": (v16/*:: as any*/),
-                                              "storageKey": null
-                                            }
-                                          ],
-                                          "type": "ImageContentPart",
-                                          "abstractKey": null
-                                        },
-                                        {
-                                          "kind": "InlineFragment",
-                                          "selections": [
-                                            {
-                                              "alias": null,
-                                              "args": null,
-                                              "concreteType": null,
-                                              "kind": "LinkedField",
-                                              "name": "file",
-                                              "plural": false,
-                                              "selections": (v16/*:: as any*/),
-                                              "storageKey": null
-                                            }
-                                          ],
-                                          "type": "FileContentPart",
-                                          "abstractKey": null
-                                        }
-                                      ],
-                                      "args": null,
-                                      "argumentDefinitions": []
-                                    },
-                                    {
                                       "kind": "InlineFragment",
                                       "selections": [
                                         {
@@ -749,7 +669,7 @@ return {
                                           "name": "toolCall",
                                           "plural": false,
                                           "selections": [
-                                            (v17/*:: as any*/),
+                                            (v16/*:: as any*/),
                                             {
                                               "alias": null,
                                               "args": null,
@@ -787,7 +707,7 @@ return {
                                           "name": "toolResult",
                                           "plural": false,
                                           "selections": [
-                                            (v17/*:: as any*/),
+                                            (v16/*:: as any*/),
                                             {
                                               "alias": null,
                                               "args": null,
@@ -950,7 +870,7 @@ return {
           "kind": "InlineFragment",
           "selections": [
             (v1/*:: as any*/),
-            (v18/*:: as any*/),
+            (v17/*:: as any*/),
             {
               "alias": null,
               "args": null,
@@ -984,7 +904,7 @@ return {
           "kind": "InlineFragment",
           "selections": [
             (v1/*:: as any*/),
-            (v18/*:: as any*/),
+            (v17/*:: as any*/),
             {
               "alias": null,
               "args": null,

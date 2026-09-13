@@ -1,5 +1,5 @@
 /**
- * @generated SignedSource<<7eb0c0ad92b5789bce9849a68ea9dd65>>
+ * @generated SignedSource<<00ffa84d27ee2e216c2cb23a177c2d43>>
  * @lightSyntaxTransform
  */
 
@@ -11,7 +11,7 @@ import { ConcreteRequest } from 'relay-runtime';
 export type AnthropicOutputConfigEffort = "HIGH" | "LOW" | "MAX" | "MEDIUM" | "XHIGH";
 export type AnthropicThinkingDisplay = "OMITTED" | "SUMMARIZED";
 export type ExperimentRunAnnotatorKind = "CODE" | "HUMAN" | "LLM";
-export type GenerativeProviderKey = "ANTHROPIC" | "AWS" | "AZURE_OPENAI" | "CEREBRAS" | "DEEPSEEK" | "FIREWORKS" | "GOOGLE" | "GROQ" | "MINIMAX" | "MOONSHOT" | "OLLAMA" | "OPENAI" | "PERPLEXITY" | "TOGETHER" | "XAI" | "ZAI";
+export type GenerativeProviderKey = "ANTHROPIC" | "AWS" | "AZURE_OPENAI" | "CEREBRAS" | "DEEPSEEK" | "FIREWORKS" | "GOOGLE" | "GROQ" | "META" | "MINIMAX" | "MOONSHOT" | "OLLAMA" | "OPENAI" | "PERPLEXITY" | "TOGETHER" | "XAI" | "ZAI";
 export type GoogleThinkingLevel = "HIGH" | "LOW" | "MEDIUM" | "MINIMAL";
 export type OpenAIApiType = "CHAT_COMPLETIONS" | "RESPONSES";
 export type OpenAIReasoningEffort = "HIGH" | "LOW" | "MEDIUM" | "MINIMAL" | "NONE" | "XHIGH";
@@ -44,6 +44,7 @@ export type ChatPromptVersionInput = {
   customProviderId?: string | null;
   description?: string | null;
   invocationParameters: PromptInvocationParametersInput;
+  metadata?: any | null;
   modelName: string;
   modelProvider: GenerativeProviderKey;
   responseFormat?: PromptResponseFormatJSONSchemaInput | null;
@@ -59,61 +60,17 @@ export type PromptMessageInput = {
   role: PromptMessageRole;
 };
 export type ContentPartInput = {
-  file?: never;
-  fileVariable?: never;
-  image?: never;
-  imageVariable?: never;
   text: TextContentValueInput;
   toolCall?: never;
   toolResult?: never;
 } | {
-  file?: never;
-  fileVariable?: never;
-  image?: never;
-  imageVariable?: never;
   text?: never;
   toolCall: ToolCallContentValueInput;
   toolResult?: never;
 } | {
-  file?: never;
-  fileVariable?: never;
-  image?: never;
-  imageVariable?: never;
   text?: never;
   toolCall?: never;
   toolResult: ToolResultContentValueInput;
-} | {
-  file?: never;
-  fileVariable?: never;
-  image: ImageContentValueInput;
-  imageVariable?: never;
-  text?: never;
-  toolCall?: never;
-  toolResult?: never;
-} | {
-  file?: never;
-  fileVariable?: never;
-  image?: never;
-  imageVariable: ImageVariableValueInput;
-  text?: never;
-  toolCall?: never;
-  toolResult?: never;
-} | {
-  file: ImageContentValueInput;
-  fileVariable?: never;
-  image?: never;
-  imageVariable?: never;
-  text?: never;
-  toolCall?: never;
-  toolResult?: never;
-} | {
-  file?: never;
-  fileVariable: ImageVariableValueInput;
-  image?: never;
-  imageVariable?: never;
-  text?: never;
-  toolCall?: never;
-  toolResult?: never;
 };
 export type TextContentValueInput = {
   text: string;
@@ -130,13 +87,6 @@ export type ToolCallFunctionInput = {
 export type ToolResultContentValueInput = {
   result: any;
   toolCallId: string;
-};
-export type ImageContentValueInput = {
-  mediaType: string;
-  url: string;
-};
-export type ImageVariableValueInput = {
-  variable: string;
 };
 export type PromptInvocationParametersInput = {
   anthropic?: never;

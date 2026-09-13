@@ -1,5 +1,5 @@
 /**
- * @generated SignedSource<<7ac32fee3a568e57fdb47bd4d62fa0e9>>
+ * @generated SignedSource<<5152d696185825b460562b44b62c0734>>
  * @lightSyntaxTransform
  */
 
@@ -8,7 +8,7 @@
 // @ts-nocheck
 
 import { ReaderFragment } from 'relay-runtime';
-export type ModelProvider = "ANTHROPIC" | "AWS" | "AZURE_OPENAI" | "CEREBRAS" | "DEEPSEEK" | "FIREWORKS" | "GOOGLE" | "GROQ" | "MINIMAX" | "MOONSHOT" | "OLLAMA" | "OPENAI" | "PERPLEXITY" | "TOGETHER" | "XAI" | "ZAI";
+export type ModelProvider = "ANTHROPIC" | "AWS" | "AZURE_OPENAI" | "CEREBRAS" | "DEEPSEEK" | "FIREWORKS" | "GOOGLE" | "GROQ" | "META" | "MINIMAX" | "MOONSHOT" | "OLLAMA" | "OPENAI" | "PERPLEXITY" | "TOGETHER" | "XAI" | "ZAI";
 export type PromptMessageRole = "AI" | "SYSTEM" | "TOOL" | "USER";
 export type PromptTemplateFormat = "F_STRING" | "MUSTACHE" | "NONE";
 export type PromptTemplateType = "CHAT" | "STRING";
@@ -19,22 +19,29 @@ export type PromptChatMessagesCard__main$data = {
     readonly __typename: "PromptChatTemplate";
     readonly messages: ReadonlyArray<{
       readonly content: ReadonlyArray<{
-        readonly __typename: string;
-        readonly text?: {
+        readonly __typename: "TextContentPart";
+        readonly text: {
           readonly text: string;
         };
-        readonly toolCall?: {
+      } | {
+        readonly __typename: "ToolCallContentPart";
+        readonly toolCall: {
           readonly toolCall: {
             readonly arguments: string;
             readonly name: string;
           };
           readonly toolCallId: string;
         };
-        readonly toolResult?: {
+      } | {
+        readonly __typename: "ToolResultContentPart";
+        readonly toolResult: {
           readonly result: any;
           readonly toolCallId: string;
         };
-        readonly " $fragmentSpreads": FragmentRefs<"mediaContentPartFragment">;
+      } | {
+        // This will never be '%other', but we need some
+        // value in case none of the concrete values match.
+        readonly __typename: "%other";
       }>;
       readonly role: PromptMessageRole;
     }>;
@@ -63,45 +70,7 @@ var v0 = {
   "name": "__typename",
   "storageKey": null
 },
-v1 = [
-  (v0/*:: as any*/),
-  {
-    "kind": "InlineFragment",
-    "selections": [
-      {
-        "alias": null,
-        "args": null,
-        "kind": "ScalarField",
-        "name": "url",
-        "storageKey": null
-      },
-      {
-        "alias": null,
-        "args": null,
-        "kind": "ScalarField",
-        "name": "mediaType",
-        "storageKey": null
-      }
-    ],
-    "type": "ImageContentValue",
-    "abstractKey": null
-  },
-  {
-    "kind": "InlineFragment",
-    "selections": [
-      {
-        "alias": null,
-        "args": null,
-        "kind": "ScalarField",
-        "name": "variable",
-        "storageKey": null
-      }
-    ],
-    "type": "ImageVariableValue",
-    "abstractKey": null
-  }
-],
-v2 = {
+v1 = {
   "alias": null,
   "args": null,
   "kind": "ScalarField",
@@ -183,48 +152,6 @@ return {
                       "abstractKey": null
                     },
                     {
-                      "kind": "InlineDataFragmentSpread",
-                      "name": "mediaContentPartFragment",
-                      "selections": [
-                        {
-                          "kind": "InlineFragment",
-                          "selections": [
-                            {
-                              "alias": null,
-                              "args": null,
-                              "concreteType": null,
-                              "kind": "LinkedField",
-                              "name": "image",
-                              "plural": false,
-                              "selections": (v1/*:: as any*/),
-                              "storageKey": null
-                            }
-                          ],
-                          "type": "ImageContentPart",
-                          "abstractKey": null
-                        },
-                        {
-                          "kind": "InlineFragment",
-                          "selections": [
-                            {
-                              "alias": null,
-                              "args": null,
-                              "concreteType": null,
-                              "kind": "LinkedField",
-                              "name": "file",
-                              "plural": false,
-                              "selections": (v1/*:: as any*/),
-                              "storageKey": null
-                            }
-                          ],
-                          "type": "FileContentPart",
-                          "abstractKey": null
-                        }
-                      ],
-                      "args": null,
-                      "argumentDefinitions": []
-                    },
-                    {
                       "kind": "InlineFragment",
                       "selections": [
                         {
@@ -235,7 +162,7 @@ return {
                           "name": "toolCall",
                           "plural": false,
                           "selections": [
-                            (v2/*:: as any*/),
+                            (v1/*:: as any*/),
                             {
                               "alias": null,
                               "args": null,
@@ -279,7 +206,7 @@ return {
                           "name": "toolResult",
                           "plural": false,
                           "selections": [
-                            (v2/*:: as any*/),
+                            (v1/*:: as any*/),
                             {
                               "alias": null,
                               "args": null,
@@ -341,6 +268,6 @@ return {
 };
 })();
 
-(node as any).hash = "336028e983632796457b6858186745ba";
+(node as any).hash = "e0d9c12926330e5e774cbc64de158a82";
 
 export default node;

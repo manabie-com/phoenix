@@ -19,14 +19,14 @@ from phoenix.server.agents.prompts.templating import get_template
 
 _SERVER_DIR = Path(__file__).resolve().parents[2]
 
-GENERAL_SKILLS_ROOT = Path(__file__).resolve().parent / "general"
+SHARED_SKILLS_ROOT = Path(__file__).resolve().parent
 PXI_SKILLS_ROOT = _SERVER_DIR / "agents" / "prompts" / "skills"
-PXI_SKILLS_ROOTS: tuple[Path, ...] = (
-    # GENERAL_SKILLS_ROOT,  # uncomment once it holds real skills, not a placeholder
-    PXI_SKILLS_ROOT,
-)
+PXI_SKILLS_ROOTS: tuple[Path, ...] = (SHARED_SKILLS_ROOT, PXI_SKILLS_ROOT)
 
 SKILL_TOOLS_TAG = "phoenix-mcp-skills"
+LOAD_SKILL_TOOL_NAME = "load_skill"
+LOAD_SKILL_REFERENCE_TOOL_NAME = "load_skill_reference"
+SKILL_TOOL_NAMES: tuple[str, ...] = (LOAD_SKILL_TOOL_NAME, LOAD_SKILL_REFERENCE_TOOL_NAME)
 
 _INSTRUCTIONS_TEMPLATE = get_template("skills/SKILLS_INSTRUCTIONS.xml.j2")
 
@@ -164,6 +164,8 @@ def load_skills(roots: tuple[Path, ...]) -> tuple[Skill, ...]:
     """Every skill under ``roots``: root order first, name order within a root."""
     skills: dict[str, Skill] = {}
     for root in roots:
+        if not root.is_dir():
+            raise ValueError(f"Skills root {root} is not a directory")
         for directory in sorted(p for p in root.iterdir() if (p / _SKILL_FILE).is_file()):
             skill = Skill.from_directory(directory)
             if skill.name in skills:
@@ -172,8 +174,6 @@ def load_skills(roots: tuple[Path, ...]) -> tuple[Skill, ...]:
                     f"{skills[skill.name].path} and {directory}"
                 )
             skills[skill.name] = skill
-    if roots and not skills:
-        raise ValueError(f"No skills found under {', '.join(str(root) for root in roots)}")
     return tuple(skills.values())
 
 
@@ -223,6 +223,7 @@ def register_skill_tools(mcp: FastMCP, skills: Sequence[Skill]) -> None:
 
     load = Tool.from_function(
         load_skill,
+        name=LOAD_SKILL_TOOL_NAME,
         description=(
             "Load a Phoenix skill's instructions. Call this before working in a skill's "
             "domain, once per skill per conversation, and follow what it returns."
@@ -233,6 +234,7 @@ def register_skill_tools(mcp: FastMCP, skills: Sequence[Skill]) -> None:
     )
     read = Tool.from_function(
         load_skill_reference,
+        name=LOAD_SKILL_REFERENCE_TOOL_NAME,
         description=(
             "Load a reference file of a skill already loaded with `load_skill`, "
             "using the exact skill and reference names that load listed."
@@ -259,10 +261,11 @@ def _set_parameter_enums(tool: Tool, **values: Sequence[str]) -> Tool:
 
 
 __all__ = [
-    "GENERAL_SKILLS_ROOT",
+    "SHARED_SKILLS_ROOT",
     "PXI_SKILLS_ROOT",
     "PXI_SKILLS_ROOTS",
     "SKILL_TOOLS_TAG",
+    "SKILL_TOOL_NAMES",
     "Skill",
     "SkillReference",
     "load_skills",
