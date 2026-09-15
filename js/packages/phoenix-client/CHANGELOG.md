@@ -1,5 +1,23 @@
 # @arizeai/phoenix-client
 
+## 7.11.0
+
+### Minor Changes
+
+- 2b73847: Accept `metadata` in `promptVersion()` so prompt versions can carry arbitrary JSON metadata.
+
+## 7.10.0
+
+### Minor Changes
+
+- c839254: Add `error`, `minLatencyMs`, and `maxLatencyMs` filters to `getTraces`, matching the query parameters on `GET /v1/projects/{id}/traces` (requires Phoenix server >= 20.8.0).
+
+## 7.9.0
+
+### Minor Changes
+
+- bf047af: Add Meta (Muse Spark models) as a built-in OpenAI-compatible model provider (`META`).
+
 ## 7.8.0
 
 ### Minor Changes

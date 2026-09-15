@@ -221,6 +221,7 @@
                       "docs/phoenix/evaluation/pre-built-metrics",
                       "docs/phoenix/evaluation/pre-built-metrics/faithfulness",
                       "docs/phoenix/evaluation/pre-built-metrics/hallucination",
+                      "docs/phoenix/evaluation/pre-built-metrics/completeness",
                       "docs/phoenix/evaluation/pre-built-metrics/conciseness",
                       "docs/phoenix/evaluation/pre-built-metrics/correctness",
                       "docs/phoenix/evaluation/pre-built-metrics/retrieval-relevance",
@@ -291,6 +292,7 @@
               {
                 "group": "Integrations",
                 "pages": [
+                  "docs/phoenix/integrations/evaluation-integrations/harbor",
                   "docs/phoenix/evaluation/integrations/pytest",
                   "docs/phoenix/evaluation/integrations/vitest-jest"
                 ]
@@ -901,6 +903,7 @@
             "group": "Evaluation Integrations",
             "icon": "clipboard-check",
             "pages": [
+              "docs/phoenix/integrations/evaluation-integrations/harbor",
               "docs/phoenix/integrations/evaluation-integrations/cleanlab",
               "docs/phoenix/integrations/evaluation-integrations/mlflow",
               "docs/phoenix/integrations/evaluation-integrations/ragas",
@@ -1383,6 +1386,7 @@
           {
             "group": "09.2026",
             "pages": [
+              "docs/phoenix/release-notes/09-2026/09-08-2026-model-providers-trace-filters-and-pxi",
               "docs/phoenix/release-notes/09-2026/09-01-2026-github-issues-pii-detection-and-client-updates"
             ]
           },
@@ -1667,63 +1671,26 @@
     "dark": "/docs/logo/dark.png"
   },
   "navbar": {
-    "links": [
-      {
-        "label": "",
-        "href": "https://join.slack.com/t/arize-ai/shared_invite/zt-3r07iavnk-ammtATWSlF0pSrd1DsMW7g",
-        "title": "Community Slack",
-        "icon": "users"
-      },
-      {
-        "label": "",
-        "href": "https://arize.com/blog/?cat=phoenix",
-        "title": "Blog",
-        "icon": "newspaper"
-      },
-      {
-        "label": "",
-        "href": "https://x.com/ArizePhoenix",
-        "title": "X",
-        "icon": {
-          "name": "x-twitter",
-          "library": "fontawesome",
-          "style": "brands"
-        }
-      },
-      {
-        "label": "",
-        "href": "https://bsky.app/profile/arize-phoenix.bsky.social",
-        "title": "Bluesky",
-        "icon": {
-          "name": "bluesky",
-          "library": "fontawesome",
-          "style": "brands"
-        }
-      },
-      {
-        "label": "",
-        "href": "https://www.linkedin.com/showcase/113218220",
-        "title": "LinkedIn",
-        "icon": {
-          "name": "linkedin",
-          "library": "fontawesome",
-          "style": "brands"
-        }
-      },
-      {
-        "label": "",
-        "href": "https://github.com/Arize-ai/phoenix",
-        "title": "GitHub",
-        "icon": {
-          "name": "github",
-          "library": "fontawesome",
-          "style": "brands"
-        }
-      }
-    ]
+    "links": []
   },
   "footer": {
+    "socials": {
+      "slack": "https://join.slack.com/t/arize-ai/shared_invite/zt-3r07iavnk-ammtATWSlF0pSrd1DsMW7g",
+      "x": "https://x.com/ArizePhoenix",
+      "bluesky": "https://bsky.app/profile/arize-phoenix.bsky.social",
+      "linkedin": "https://www.linkedin.com/showcase/113218220",
+      "github": "https://github.com/Arize-ai/phoenix"
+    },
     "links": [
+      {
+        "label": "Resources",
+        "items": [
+          {
+            "label": "Blog",
+            "href": "https://arize.com/blog/?cat=phoenix"
+          }
+        ]
+      },
       {
         "label": "Languages",
         "items": [
