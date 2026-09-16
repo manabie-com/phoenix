@@ -6,6 +6,7 @@ import {
   Icon,
   IconButton,
   Icons,
+  IDBadge,
   Text,
 } from "@phoenix/components";
 import {
@@ -24,9 +25,13 @@ const contentCSS = css`
 
 export interface ExperimentInputCellProps {
   /**
-   * The example ID to display
+   * The example ID
    */
   exampleId: string;
+  /**
+   * The example's external ID, displayed in place of the node ID when present
+   */
+  externalId?: string | null;
   /**
    * The input value to render in the cell
    */
@@ -36,7 +41,7 @@ export interface ExperimentInputCellProps {
    */
   height: number;
   /**
-   * Callback when the expand button is clicked
+   * Callback when the expand button is pressed
    */
   onExpand: () => void;
 }
@@ -47,6 +52,7 @@ export interface ExperimentInputCellProps {
  */
 export function ExperimentInputCell({
   exampleId,
+  externalId,
   value,
   height,
   onExpand,
@@ -70,12 +76,14 @@ export function ExperimentInputCell({
           </TooltipTrigger>
         }
       >
-        <Text
-          color="text-500"
-          css={css`
-            white-space: nowrap;
-          `}
-        >{`example ${exampleId}`}</Text>
+        <Flex direction="row" gap="size-100" alignItems="center">
+          <Text color="text-500">example</Text>
+          <IDBadge
+            id={externalId ?? exampleId}
+            variant="quiet"
+            tooltipText="Copy example ID"
+          />
+        </Flex>
       </CellTop>
       <ExpandableContent height={height}>
         <div css={contentCSS}>
