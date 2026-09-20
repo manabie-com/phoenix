@@ -754,13 +754,17 @@ def _lifespan(
                     print(welcome_message(system_settings), flush=True)
                 except Exception:
                     logger.exception("Failed to render the startup banner")
-            yield {
+            lifespan_state: dict[str, Any] = {
                 "event_queue": dml_event_handler,
                 "enqueue_annotations": enqueue_annotations,
                 "enqueue_span": enqueue_span,
                 "enqueue_operation": enqueue_operation,
                 "experiment_runner": experiment_runner,
             }
+            # Read by the in-process MCP dispatch, which has no server to copy
+            # the yielded state into its request scopes.
+            app.state.lifespan_state = lifespan_state
+            yield lifespan_state
         for callback in shutdown_callbacks:
             if isinstance((res := callback()), Awaitable):
                 await res
@@ -807,7 +811,7 @@ def create_graphql_router(
     """Creates the GraphQL router.
 
     Args:
-        schema (BaseSchema): The GraphQL schema.
+        graphql_schema (strawberry.Schema): The GraphQL schema.
         db (DbSessionFactory): The database session factory pointing to a SQL database.
         last_updated_at (CanGetLastUpdatedAt): How to get the last updated timestamp for updates.
         authentication_enabled (bool): Whether authentication is enabled.
