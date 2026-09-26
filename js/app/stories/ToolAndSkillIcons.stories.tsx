@@ -12,6 +12,7 @@ import {
 } from "@phoenix/components/agent/ToolPart";
 import { Heading } from "@phoenix/components/core/content";
 import { View } from "@phoenix/components/core/view";
+import { AgentChatRuntimeProvider } from "@phoenix/contexts/AgentChatRuntimeContext";
 import { AgentContext } from "@phoenix/contexts/AgentContext";
 import { createAgentStore } from "@phoenix/store/agentStore";
 
@@ -24,7 +25,9 @@ function AgentStoreStoryProvider({ children }: { children: React.ReactNode }) {
   const [store] = useState(() => createAgentStore());
 
   return (
-    <AgentContext.Provider value={store}>{children}</AgentContext.Provider>
+    <AgentContext.Provider value={store}>
+      <AgentChatRuntimeProvider>{children}</AgentChatRuntimeProvider>
+    </AgentContext.Provider>
   );
 }
 
@@ -250,14 +253,12 @@ const toolIconItems = [
 ] satisfies Array<{ label: string; part: ToolPartType }>;
 
 const builtInSkillIconItems = [
-  "annotate-spans",
   "datasets",
-  "debug-trace",
   "evaluators",
   "experiments",
+  "phoenix-error-analysis",
   "phoenix-graphql",
   "playground",
-  "span-coding",
 ].map((skillName) => ({
   skillName,
   part: makePart({

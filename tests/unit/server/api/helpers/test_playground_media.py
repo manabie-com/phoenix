@@ -837,8 +837,13 @@ class TestProviderSdkContracts:
             ANTHROPIC_SUPPORTED_IMAGE_MEDIA_TYPES,
         )
 
+        # The SDK has changed whether `media_type` is a bare Literal or a Literal
+        # wrapped in another generic (e.g. Optional); unwrap either shape.
         hint = typing.get_type_hints(Base64ImageSourceParam)["media_type"]
-        allowed = set(typing.get_args(typing.get_args(hint)[0]))
+        if typing.get_origin(hint) is typing.Literal:
+            allowed = set(typing.get_args(hint))
+        else:
+            allowed = set(typing.get_args(typing.get_args(hint)[0]))
         assert allowed == set(ANTHROPIC_SUPPORTED_IMAGE_MEDIA_TYPES)
 
     def test_bedrock_formats_match_the_sdk(self) -> None:
