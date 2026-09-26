@@ -132,7 +132,12 @@ from phoenix.server.email.types import EmailSender
 from phoenix.server.encryption import EncryptionService
 from phoenix.server.grpc_server import GrpcServer
 from phoenix.server.jwt_store import JwtStore
-from phoenix.server.mcp.skills import PXI_SKILLS_ROOTS
+from phoenix.server.mcp.skills import (
+    PXI_SKILLS_ROOTS,
+    load_external_skills,
+    load_skills,
+    merge_skills,
+)
 from phoenix.server.mcp_server import (
     MCP_MOUNT_PATH,
     BearerAuthGuard,
@@ -754,13 +759,17 @@ def _lifespan(
                     print(welcome_message(system_settings), flush=True)
                 except Exception:
                     logger.exception("Failed to render the startup banner")
-            yield {
+            lifespan_state: dict[str, Any] = {
                 "event_queue": dml_event_handler,
                 "enqueue_annotations": enqueue_annotations,
                 "enqueue_span": enqueue_span,
                 "enqueue_operation": enqueue_operation,
                 "experiment_runner": experiment_runner,
             }
+            # Read by the in-process MCP dispatch, which has no server to copy
+            # the yielded state into its request scopes.
+            app.state.lifespan_state = lifespan_state
+            yield lifespan_state
         for callback in shutdown_callbacks:
             if isinstance((res := callback()), Awaitable):
                 await res
@@ -807,7 +816,7 @@ def create_graphql_router(
     """Creates the GraphQL router.
 
     Args:
-        schema (BaseSchema): The GraphQL schema.
+        graphql_schema (strawberry.Schema): The GraphQL schema.
         db (DbSessionFactory): The database session factory pointing to a SQL database.
         last_updated_at (CanGetLastUpdatedAt): How to get the last updated timestamp for updates.
         authentication_enabled (bool): Whether authentication is enabled.
@@ -1210,6 +1219,8 @@ def create_app(
         return schema
 
     app.openapi = _openapi  # type: ignore[method-assign]
+    external_skills = load_external_skills()
+    app.state.agent_skills = merge_skills(load_skills(PXI_SKILLS_ROOTS), external_skills)
     mcp_http_app = None
     mcp_code_mode_sandbox = None
     if mcp_mount_path is not None:
@@ -1221,6 +1232,7 @@ def create_app(
             app,
             monty_runtime=sandbox_runtime.monty,
             db=db,
+            external_skills=external_skills,
         )
         # The guard reads scope["user"], so it is installed exactly when the
         # AuthenticationMiddleware that populates it is (token_store above).
@@ -1254,6 +1266,7 @@ def create_app(
             read_only=True,
             db=db,
             skills_roots=PXI_SKILLS_ROOTS,
+            external_skills=external_skills,
         )
     app.state.pxi_mcp_server = pxi_mcp_server
     app.state.pxi_mcp_sandbox = pxi_mcp_sandbox

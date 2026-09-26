@@ -98,6 +98,32 @@ export const LIST_PROJECT_TRACES: RouteRequirement = {
   minServerVersion: [13, 15, 0],
 };
 
+export const GET_TRACES_FILTERS: ParameterRequirement = {
+  kind: "parameter",
+  parameterName: "error",
+  parameterLocation: "query",
+  route: "GET /v1/projects/{id}/traces",
+  minServerVersion: [20, 8, 0],
+  description:
+    "The 'error', 'min_latency_ms', and 'max_latency_ms' query parameters on GET /v1/projects/{id}/traces",
+};
+
+export const GET_TRACES_FILTER_EXPRESSION: ParameterRequirement = {
+  kind: "parameter",
+  parameterName: "filter",
+  parameterLocation: "query",
+  route: "GET /v1/projects/{id}/traces",
+  minServerVersion: [20, 12, 0],
+};
+
+export const LIST_SESSIONS_FILTER_EXPRESSION: ParameterRequirement = {
+  kind: "parameter",
+  parameterName: "filter",
+  parameterLocation: "query",
+  route: "GET /v1/projects/{id}/sessions",
+  minServerVersion: [20, 12, 0],
+};
+
 export const TRANSFER_TRACES: RouteRequirement = {
   kind: "route",
   method: "POST",
@@ -119,6 +145,27 @@ export const DATASET_UPLOAD_EXAMPLE_IDS: ParameterRequirement = {
   parameterLocation: "body",
   route: "POST /v1/datasets/upload",
   minServerVersion: [15, 0, 0],
+};
+
+export const CREATE_DATASET_SPLIT: RouteRequirement = {
+  kind: "route",
+  method: "POST",
+  path: "/v1/datasets/{dataset_identifier}/splits",
+  minServerVersion: [19, 20, 0],
+};
+
+export const UPDATE_DATASET_SPLIT: RouteRequirement = {
+  kind: "route",
+  method: "PATCH",
+  path: "/v1/datasets/{dataset_identifier}/splits/{split_id}",
+  minServerVersion: [19, 20, 0],
+};
+
+export const DELETE_DATASET_SPLIT: RouteRequirement = {
+  kind: "route",
+  method: "DELETE",
+  path: "/v1/datasets/{dataset_identifier}/splits/{split_id}",
+  minServerVersion: [19, 20, 0],
 };
 
 export const ADD_TRACE_NOTE_IDENTIFIER: ParameterRequirement = {
@@ -234,8 +281,14 @@ export const ALL_REQUIREMENTS: readonly CapabilityRequirement[] = [
   GET_SPANS_FILTERS,
   GET_SPANS_BY_ATTRIBUTE,
   LIST_PROJECT_TRACES,
+  GET_TRACES_FILTERS,
+  GET_TRACES_FILTER_EXPRESSION,
+  LIST_SESSIONS_FILTER_EXPRESSION,
   TRANSFER_TRACES,
   DATASET_UPLOAD_EXAMPLE_IDS,
+  CREATE_DATASET_SPLIT,
+  UPDATE_DATASET_SPLIT,
+  DELETE_DATASET_SPLIT,
   ADD_TRACE_NOTE_IDENTIFIER,
   ADD_SPAN_NOTE_IDENTIFIER,
   ADD_SESSION_NOTE_IDENTIFIER,
