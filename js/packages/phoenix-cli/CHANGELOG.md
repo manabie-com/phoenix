@@ -1,5 +1,51 @@
 # @arizeai/phoenix-cli
 
+## 1.18.5
+
+### Patch Changes
+
+- Updated dependencies [aab229f]
+  - @arizeai/phoenix-client@7.14.0
+
+## 1.18.4
+
+### Patch Changes
+
+- Updated dependencies [c282563]
+  - @arizeai/phoenix-client@7.13.0
+
+## 1.18.3
+
+### Patch Changes
+
+- Updated dependencies [dab09f1]
+  - @arizeai/phoenix-client@7.12.0
+
+## 1.18.2
+
+### Patch Changes
+
+- Updated dependencies [2b73847]
+  - @arizeai/phoenix-client@7.11.0
+
+## 1.18.1
+
+### Patch Changes
+
+- Updated dependencies [c839254]
+  - @arizeai/phoenix-client@7.10.0
+
+## 1.18.0
+
+### Minor Changes
+
+- bf047af: Add Meta (Muse Spark models) as a built-in OpenAI-compatible model provider (`META`).
+
+### Patch Changes
+
+- Updated dependencies [bf047af]
+  - @arizeai/phoenix-client@7.9.0
+
 ## 1.17.0
 
 ### Minor Changes
