@@ -237,7 +237,7 @@ async def store_media(
                 size_bytes=len(content),
                 file_name=file_name,
             ),
-            dialect=SupportedSQLDialect(session.bind.dialect.name),
+            dialect=SupportedSQLDialect(session.get_bind().dialect.name),
             table=models.MediaFile,
             unique_by=("sha256",),
             on_conflict=OnConflict.DO_NOTHING,
