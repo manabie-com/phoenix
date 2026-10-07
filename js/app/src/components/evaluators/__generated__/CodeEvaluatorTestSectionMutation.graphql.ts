@@ -1,5 +1,5 @@
 /**
- * @generated SignedSource<<db4318c06d0dc86c12bd3ac87b8ba014>>
+ * @generated SignedSource<<2e7d743f28758b8e061ff1cd2c4653ad>>
  * @lightSyntaxTransform
  */
 
@@ -10,7 +10,7 @@
 import { ConcreteRequest } from 'relay-runtime';
 export type AnthropicOutputConfigEffort = "HIGH" | "LOW" | "MAX" | "MEDIUM" | "XHIGH";
 export type AnthropicThinkingDisplay = "OMITTED" | "SUMMARIZED";
-export type GenerativeProviderKey = "ANTHROPIC" | "AWS" | "AZURE_OPENAI" | "CEREBRAS" | "DEEPSEEK" | "FIREWORKS" | "GOOGLE" | "GROQ" | "MINIMAX" | "MOONSHOT" | "OLLAMA" | "OPENAI" | "PERPLEXITY" | "TOGETHER" | "XAI" | "ZAI";
+export type GenerativeProviderKey = "ANTHROPIC" | "AWS" | "AZURE_OPENAI" | "CEREBRAS" | "DEEPSEEK" | "FIREWORKS" | "GOOGLE" | "GROQ" | "META" | "MINIMAX" | "MOONSHOT" | "OLLAMA" | "OPENAI" | "PERPLEXITY" | "TOGETHER" | "XAI" | "ZAI";
 export type GoogleThinkingLevel = "HIGH" | "LOW" | "MEDIUM" | "MINIMAL";
 export type Language = "PYTHON" | "TYPESCRIPT";
 export type OpenAIReasoningEffort = "HIGH" | "LOW" | "MEDIUM" | "MINIMAL" | "NONE" | "XHIGH";
@@ -57,6 +57,7 @@ export type ChatPromptVersionInput = {
   customProviderId?: string | null;
   description?: string | null;
   invocationParameters: PromptInvocationParametersInput;
+  metadata?: any | null;
   modelName: string;
   modelProvider: GenerativeProviderKey;
   responseFormat?: PromptResponseFormatJSONSchemaInput | null;
