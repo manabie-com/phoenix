@@ -838,7 +838,10 @@ class TestProviderSdkContracts:
         )
 
         hint = typing.get_type_hints(Base64ImageSourceParam)["media_type"]
-        allowed = set(typing.get_args(typing.get_args(hint)[0]))
+        # Older SDKs wrap the literal in `Required[...]`; newer ones do not.
+        if typing.get_origin(hint) is not typing.Literal:
+            hint = typing.get_args(hint)[0]
+        allowed = set(typing.get_args(hint))
         assert allowed == set(ANTHROPIC_SUPPORTED_IMAGE_MEDIA_TYPES)
 
     def test_bedrock_formats_match_the_sdk(self) -> None:
