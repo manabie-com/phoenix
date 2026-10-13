@@ -118,13 +118,13 @@ from phoenix.server.api.routers.v1 import REST_API_VERSION
 from phoenix.server.api.schema import build_graphql_schema
 from phoenix.server.authorization import insufficient_storage_message
 from phoenix.server.bearer_auth import BearerTokenAuthBackend, PhoenixUser, is_authenticated
+from phoenix.server.cost_tracking.span_cost_calculator import SpanCostCalculator
 from phoenix.server.daemons.agent_session_sweeper import AgentSessionSweeper
 from phoenix.server.daemons.db_disk_usage_monitor import DbDiskUsageMonitor
 from phoenix.server.daemons.experiment_runner import ExperimentRunner
 from phoenix.server.daemons.experiment_sweeper import ExperimentSweeper
 from phoenix.server.daemons.generative_model_store import GenerativeModelStore
 from phoenix.server.daemons.media_sweeper import MediaSweeper
-from phoenix.server.daemons.span_cost_calculator import SpanCostCalculator
 from phoenix.server.daemons.system_settings import SystemSettings
 from phoenix.server.dml_event import DmlEvent
 from phoenix.server.dml_event_handler import DmlEventHandler
@@ -630,7 +630,9 @@ class CapacityInterceptor(AsyncServerInterceptor):
     ) -> Any:
         if self._indicator.is_full:
             SPAN_QUEUE_REJECTIONS.inc()
-            context.set_code(grpc.StatusCode.RESOURCE_EXHAUSTED)
+            # OTLP clients treat RESOURCE_EXHAUSTED without RetryInfo as non-retryable,
+            # and the spec names UNAVAILABLE as the backpressure signal.
+            context.set_code(grpc.StatusCode.UNAVAILABLE)
             context.set_details("Server is at capacity and cannot process more requests")
             return
 
@@ -646,7 +648,6 @@ def _lifespan(
     agent_session_sweeper: AgentSessionSweeper,
     experiment_sweeper: ExperimentSweeper,
     media_sweeper: MediaSweeper,
-    span_cost_calculator: SpanCostCalculator,
     generative_model_store: GenerativeModelStore,
     system_settings: SystemSettings,
     db_disk_usage_monitor: DbDiskUsageMonitor,
@@ -702,7 +703,6 @@ def _lifespan(
             await stack.enter_async_context(agent_session_sweeper)
             await stack.enter_async_context(experiment_sweeper)
             await stack.enter_async_context(media_sweeper)
-            await stack.enter_async_context(span_cost_calculator)
             await stack.enter_async_context(generative_model_store)
             await stack.enter_async_context(system_settings)
             await stack.enter_async_context(db_disk_usage_monitor)
@@ -1034,7 +1034,7 @@ def create_app(
     experiment_sweeper = ExperimentSweeper(db)
     media_sweeper = MediaSweeper(db)
     generative_model_store = GenerativeModelStore(db)
-    span_cost_calculator = SpanCostCalculator(db, generative_model_store)
+    span_cost_calculator = SpanCostCalculator(generative_model_store)
     bulk_inserter = bulk_inserter_factory(
         db,
         span_cost_calculator=span_cost_calculator,
@@ -1123,7 +1123,6 @@ def create_app(
             agent_session_sweeper=agent_session_sweeper,
             experiment_sweeper=experiment_sweeper,
             media_sweeper=media_sweeper,
-            span_cost_calculator=span_cost_calculator,
             generative_model_store=generative_model_store,
             system_settings=system_settings,
             db_disk_usage_monitor=DbDiskUsageMonitor(db, email_sender),
