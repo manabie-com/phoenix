@@ -1,5 +1,63 @@
 # Changelog
 
+## [20.21.4](https://github.com/Arize-ai/phoenix/compare/arize-phoenix-v20.21.3...arize-phoenix-v20.21.4) (2026-10-14)
+
+
+### Bug Fixes
+
+* **ui:** keep labels on Escape and fix table sort, a11y and accessor warnings ([#16980](https://github.com/Arize-ai/phoenix/issues/16980)) ([53a1735](https://github.com/Arize-ai/phoenix/commit/53a173532c18ac0fd04370cdfcd1ea4cfefdd706))
+
+## [20.21.3](https://github.com/Arize-ai/phoenix/compare/arize-phoenix-v20.21.2...arize-phoenix-v20.21.3) (2026-10-13)
+
+
+### Documentation
+
+* fix dead Read the Docs links ([#16967](https://github.com/Arize-ai/phoenix/issues/16967)) ([0fed1f4](https://github.com/Arize-ai/phoenix/commit/0fed1f431c65cf24f52ca8153d5ffd63ce04a1b2))
+
+## [20.21.2](https://github.com/Arize-ai/phoenix/compare/arize-phoenix-v20.21.1...arize-phoenix-v20.21.2) (2026-10-13)
+
+
+### Bug Fixes
+
+* **experiments:** coerce average repeated-run latency to float on PostgreSQL ([#16957](https://github.com/Arize-ai/phoenix/issues/16957)) ([c05a170](https://github.com/Arize-ai/phoenix/commit/c05a1708b3d13c18600f71e4dd0c1a620df310d2))
+* **graphql:** normalize retrieval summary counts to int ([#16960](https://github.com/Arize-ai/phoenix/issues/16960)) ([9735fc9](https://github.com/Arize-ai/phoenix/commit/9735fc97b0a337521c06f8638f3657a52efc8320))
+
+## [20.21.1](https://github.com/Arize-ai/phoenix/compare/arize-phoenix-v20.21.0...arize-phoenix-v20.21.1) (2026-10-12)
+
+
+### Bug Fixes
+
+* improve span ingestion reliability ([#16889](https://github.com/Arize-ai/phoenix/issues/16889)) ([678740c](https://github.com/Arize-ai/phoenix/commit/678740c3be5a5568af8887a44ebbad30b01e9078))
+* **trace:** accept empty dataframes in TraceDataset ([#16913](https://github.com/Arize-ai/phoenix/issues/16913)) ([d0dc9e5](https://github.com/Arize-ai/phoenix/commit/d0dc9e5ff0a33a1962da6aae83e6f56ac72c444f))
+
+
+### Documentation
+
+* Add Scalekit to the Phoenix platform docs ([#16896](https://github.com/Arize-ai/phoenix/issues/16896)) ([1afe1ea](https://github.com/Arize-ai/phoenix/commit/1afe1ea12e77adbe56de0383f659cdbf372c26b3))
+* **readme:** make the "Add to Cursor" MCP badge clickable on GitHub ([#16926](https://github.com/Arize-ai/phoenix/issues/16926)) ([b8d0e3f](https://github.com/Arize-ai/phoenix/commit/b8d0e3fd9be43bae658cd933f66cc386ef1ed2c9))
+
+## [20.21.0](https://github.com/Arize-ai/phoenix/compare/arize-phoenix-v20.20.0...arize-phoenix-v20.21.0) (2026-10-11)
+
+
+### Features
+
+* assign a random gradient to projects created by ingestion ([#16873](https://github.com/Arize-ai/phoenix/issues/16873)) ([8946f7a](https://github.com/Arize-ai/phoenix/commit/8946f7a2d65e26b3a49a526963332dad7eb93a2e))
+* **cost-tracking:** support Mistral AI model pricing ([#16880](https://github.com/Arize-ai/phoenix/issues/16880)) ([0e33736](https://github.com/Arize-ai/phoenix/commit/0e3373680434e2ba97e3c29b2af696d893498446)), closes [#16878](https://github.com/Arize-ai/phoenix/issues/16878)
+
+
+### Bug Fixes
+
+* **agents:** upgrade pydantic-ai for CVE-2026-107286 ([#16893](https://github.com/Arize-ai/phoenix/issues/16893)) ([3cdb004](https://github.com/Arize-ai/phoenix/commit/3cdb004e7b9299c500a0686b85942ef4b590500e))
+* **deps:** update arize-phoenix-evals to 3.9.2 ([#16900](https://github.com/Arize-ai/phoenix/issues/16900)) ([e8aa1ea](https://github.com/Arize-ai/phoenix/commit/e8aa1ea8324a6dd78ba0a6c4718e2dc957a74271))
+* **playground:** sync built-in model prices and model lists ([#16894](https://github.com/Arize-ai/phoenix/issues/16894)) ([35f86e5](https://github.com/Arize-ai/phoenix/commit/35f86e5726a5881ecb69851bc7b8d27a34602c77))
+* stop dropping evaluator metadata nested under `result` ([#16902](https://github.com/Arize-ai/phoenix/issues/16902)) ([d927595](https://github.com/Arize-ai/phoenix/commit/d927595cb8ee91aacdb7af8fff3fca1d095cf2eb))
+
+
+### Documentation
+
+* Add Phoenix release notes — 2026-10-07 ([#16836](https://github.com/Arize-ai/phoenix/issues/16836)) ([bc474ef](https://github.com/Arize-ai/phoenix/commit/bc474eff80202151f16d3c8a585c8e43735d86a7))
+* reorganize Get Started around the agent workflow ([#16288](https://github.com/Arize-ai/phoenix/issues/16288)) ([2afdf48](https://github.com/Arize-ai/phoenix/commit/2afdf488e638f282f742c7daf796a09a56662971))
+
 ## [20.20.0](https://github.com/Arize-ai/phoenix/compare/arize-phoenix-v20.19.0...arize-phoenix-v20.20.0) (2026-10-08)
 
 

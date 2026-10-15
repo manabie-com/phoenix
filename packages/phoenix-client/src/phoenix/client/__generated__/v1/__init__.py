@@ -1044,17 +1044,6 @@ class ToolInputAvailablePart(TypedDict):
     approval: NotRequired[Union[ToolApprovalRequested, ToolApprovalResponded]]
 
 
-class ToolInputStreamingPart(TypedDict):
-    type: str
-    toolCallId: str
-    title: NotRequired[str]
-    state: NotRequired[Literal["input-streaming"]]
-    input: NotRequired[Any]
-    providerExecuted: NotRequired[bool]
-    callProviderMetadata: NotRequired[Mapping[str, Mapping[str, Any]]]
-    approval: NotRequired[Union[ToolApprovalRequested, ToolApprovalResponded]]
-
-
 class ToolOutputDeniedPart(TypedDict):
     type: str
     toolCallId: str
@@ -1254,6 +1243,19 @@ class WebAccessContext(TypedDict):
     enabled: bool
 
 
+class PhoenixDbTypesDataStreamProtocolRequestTypesDynamicToolInputStreamingPart(TypedDict):
+    type: Literal["dynamic-tool"]
+    toolName: str
+    toolCallId: str
+    title: NotRequired[str]
+    state: NotRequired[Literal["input-streaming"]]
+    input: NotRequired[Any]
+    rawInput: NotRequired[str]
+    providerExecuted: NotRequired[bool]
+    callProviderMetadata: NotRequired[Mapping[str, Mapping[str, Any]]]
+    approval: NotRequired[Union[ToolApprovalRequested, ToolApprovalResponded]]
+
+
 class PhoenixDbTypesDataStreamProtocolRequestTypesDynamicToolOutputAvailablePart(TypedDict):
     type: Literal["dynamic-tool"]
     toolName: str
@@ -1280,6 +1282,18 @@ class PhoenixDbTypesDataStreamProtocolRequestTypesDynamicToolOutputErrorPart(Typ
     providerExecuted: NotRequired[bool]
     callProviderMetadata: NotRequired[Mapping[str, Mapping[str, Any]]]
     resultProviderMetadata: NotRequired[Mapping[str, Mapping[str, Any]]]
+    approval: NotRequired[Union[ToolApprovalRequested, ToolApprovalResponded]]
+
+
+class PhoenixDbTypesDataStreamProtocolRequestTypesToolInputStreamingPart(TypedDict):
+    type: str
+    toolCallId: str
+    title: NotRequired[str]
+    state: NotRequired[Literal["input-streaming"]]
+    input: NotRequired[Any]
+    rawInput: NotRequired[str]
+    providerExecuted: NotRequired[bool]
+    callProviderMetadata: NotRequired[Mapping[str, Mapping[str, Any]]]
     approval: NotRequired[Union[ToolApprovalRequested, ToolApprovalResponded]]
 
 
@@ -1311,6 +1325,18 @@ class PhoenixDbTypesDataStreamProtocolRequestTypesToolOutputErrorPart(TypedDict)
     approval: NotRequired[Union[ToolApprovalRequested, ToolApprovalResponded]]
 
 
+class PydanticAiUiVercelAiRequestTypesDynamicToolInputStreamingPart(TypedDict):
+    type: Literal["dynamic-tool"]
+    toolName: str
+    toolCallId: str
+    title: NotRequired[str]
+    state: NotRequired[Literal["input-streaming"]]
+    input: NotRequired[Any]
+    providerExecuted: NotRequired[bool]
+    callProviderMetadata: NotRequired[Mapping[str, Mapping[str, Any]]]
+    approval: NotRequired[Union[ToolApprovalRequested, ToolApprovalResponded]]
+
+
 class PydanticAiUiVercelAiRequestTypesDynamicToolOutputAvailablePart(TypedDict):
     type: Literal["dynamic-tool"]
     toolName: str
@@ -1333,6 +1359,17 @@ class PydanticAiUiVercelAiRequestTypesDynamicToolOutputErrorPart(TypedDict):
     errorText: str
     title: NotRequired[str]
     state: NotRequired[Literal["output-error"]]
+    providerExecuted: NotRequired[bool]
+    callProviderMetadata: NotRequired[Mapping[str, Mapping[str, Any]]]
+    approval: NotRequired[Union[ToolApprovalRequested, ToolApprovalResponded]]
+
+
+class PydanticAiUiVercelAiRequestTypesToolInputStreamingPart(TypedDict):
+    type: str
+    toolCallId: str
+    title: NotRequired[str]
+    state: NotRequired[Literal["input-streaming"]]
+    input: NotRequired[Any]
     providerExecuted: NotRequired[bool]
     callProviderMetadata: NotRequired[Mapping[str, Mapping[str, Any]]]
     approval: NotRequired[Union[ToolApprovalRequested, ToolApprovalResponded]]
@@ -1644,18 +1681,6 @@ class DynamicToolInputAvailablePart(TypedDict):
     input: Any
     title: NotRequired[str]
     state: NotRequired[Literal["input-available"]]
-    providerExecuted: NotRequired[bool]
-    callProviderMetadata: NotRequired[Mapping[str, Mapping[str, Any]]]
-    approval: NotRequired[Union[ToolApprovalRequested, ToolApprovalResponded]]
-
-
-class DynamicToolInputStreamingPart(TypedDict):
-    type: Literal["dynamic-tool"]
-    toolName: str
-    toolCallId: str
-    title: NotRequired[str]
-    state: NotRequired[Literal["input-streaming"]]
-    input: NotRequired[Any]
     providerExecuted: NotRequired[bool]
     callProviderMetadata: NotRequired[Mapping[str, Mapping[str, Any]]]
     approval: NotRequired[Union[ToolApprovalRequested, ToolApprovalResponded]]
@@ -2119,14 +2144,14 @@ class LegacyAssistantMetadataUIMessage(TypedDict):
         Union[
             TextUIPart,
             ReasoningUIPart,
-            ToolInputStreamingPart,
+            PydanticAiUiVercelAiRequestTypesToolInputStreamingPart,
             ToolInputAvailablePart,
             PydanticAiUiVercelAiRequestTypesToolOutputAvailablePart,
             PydanticAiUiVercelAiRequestTypesToolOutputErrorPart,
             ToolApprovalRequestedPart,
             ToolApprovalRespondedPart,
             ToolOutputDeniedPart,
-            DynamicToolInputStreamingPart,
+            PydanticAiUiVercelAiRequestTypesDynamicToolInputStreamingPart,
             DynamicToolInputAvailablePart,
             PydanticAiUiVercelAiRequestTypesDynamicToolOutputAvailablePart,
             PydanticAiUiVercelAiRequestTypesDynamicToolOutputErrorPart,
@@ -2229,14 +2254,14 @@ class PhoenixUIMessage(TypedDict):
         Union[
             TextUIPart,
             ReasoningUIPart,
-            ToolInputStreamingPart,
+            PhoenixDbTypesDataStreamProtocolRequestTypesToolInputStreamingPart,
             ToolInputAvailablePart,
             PhoenixDbTypesDataStreamProtocolRequestTypesToolOutputAvailablePart,
             PhoenixDbTypesDataStreamProtocolRequestTypesToolOutputErrorPart,
             ToolApprovalRequestedPart,
             ToolApprovalRespondedPart,
             ToolOutputDeniedPart,
-            DynamicToolInputStreamingPart,
+            PhoenixDbTypesDataStreamProtocolRequestTypesDynamicToolInputStreamingPart,
             DynamicToolInputAvailablePart,
             PhoenixDbTypesDataStreamProtocolRequestTypesDynamicToolOutputAvailablePart,
             PhoenixDbTypesDataStreamProtocolRequestTypesDynamicToolOutputErrorPart,
