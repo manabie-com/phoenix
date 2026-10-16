@@ -83,6 +83,7 @@ from phoenix.config import (
     get_env_port,
     get_env_support_email,
     server_instrumentation_is_enabled,
+    server_log_export_is_enabled,
     verify_server_environment_variables,
 )
 from phoenix.db import models
@@ -118,13 +119,13 @@ from phoenix.server.api.routers.v1 import REST_API_VERSION
 from phoenix.server.api.schema import build_graphql_schema
 from phoenix.server.authorization import insufficient_storage_message
 from phoenix.server.bearer_auth import BearerTokenAuthBackend, PhoenixUser, is_authenticated
+from phoenix.server.cost_tracking.span_cost_calculator import SpanCostCalculator
 from phoenix.server.daemons.agent_session_sweeper import AgentSessionSweeper
 from phoenix.server.daemons.db_disk_usage_monitor import DbDiskUsageMonitor
 from phoenix.server.daemons.experiment_runner import ExperimentRunner
 from phoenix.server.daemons.experiment_sweeper import ExperimentSweeper
 from phoenix.server.daemons.generative_model_store import GenerativeModelStore
 from phoenix.server.daemons.media_sweeper import MediaSweeper
-from phoenix.server.daemons.span_cost_calculator import SpanCostCalculator
 from phoenix.server.daemons.system_settings import SystemSettings
 from phoenix.server.dml_event import DmlEvent
 from phoenix.server.dml_event_handler import DmlEventHandler
@@ -162,7 +163,10 @@ from phoenix.server.sandbox._download import prefetch_wasm_binary_if_needed
 from phoenix.server.sandbox.session_manager import SandboxSessionManager
 from phoenix.server.sandbox.types import SandboxRuntimeContext
 from phoenix.server.settings.registry import SETTINGS_REGISTRY
-from phoenix.server.telemetry import initialize_opentelemetry_tracer_provider
+from phoenix.server.telemetry import (
+    initialize_opentelemetry_logger_provider,
+    initialize_opentelemetry_tracer_provider,
+)
 from phoenix.server.types import (
     CanGetLastUpdatedAt,
     CanPutItem,
@@ -630,7 +634,9 @@ class CapacityInterceptor(AsyncServerInterceptor):
     ) -> Any:
         if self._indicator.is_full:
             SPAN_QUEUE_REJECTIONS.inc()
-            context.set_code(grpc.StatusCode.RESOURCE_EXHAUSTED)
+            # OTLP clients treat RESOURCE_EXHAUSTED without RetryInfo as non-retryable,
+            # and the spec names UNAVAILABLE as the backpressure signal.
+            context.set_code(grpc.StatusCode.UNAVAILABLE)
             context.set_details("Server is at capacity and cannot process more requests")
             return
 
@@ -646,7 +652,6 @@ def _lifespan(
     agent_session_sweeper: AgentSessionSweeper,
     experiment_sweeper: ExperimentSweeper,
     media_sweeper: MediaSweeper,
-    span_cost_calculator: SpanCostCalculator,
     generative_model_store: GenerativeModelStore,
     system_settings: SystemSettings,
     db_disk_usage_monitor: DbDiskUsageMonitor,
@@ -702,7 +707,6 @@ def _lifespan(
             await stack.enter_async_context(agent_session_sweeper)
             await stack.enter_async_context(experiment_sweeper)
             await stack.enter_async_context(media_sweeper)
-            await stack.enter_async_context(span_cost_calculator)
             await stack.enter_async_context(generative_model_store)
             await stack.enter_async_context(system_settings)
             await stack.enter_async_context(db_disk_usage_monitor)
@@ -1034,7 +1038,7 @@ def create_app(
     experiment_sweeper = ExperimentSweeper(db)
     media_sweeper = MediaSweeper(db)
     generative_model_store = GenerativeModelStore(db)
-    span_cost_calculator = SpanCostCalculator(db, generative_model_store)
+    span_cost_calculator = SpanCostCalculator(generative_model_store)
     bulk_inserter = bulk_inserter_factory(
         db,
         span_cost_calculator=span_cost_calculator,
@@ -1067,6 +1071,8 @@ def create_app(
                 self._tracer = cast(TracerProvider, tracer_provider).get_tracer("strawberry")
 
         graphql_schema_extensions.append(_OpenTelemetryExtension)
+    if server_log_export_is_enabled():
+        shutdown_callbacks_list.append(initialize_opentelemetry_logger_provider().shutdown)
     encryption_service = EncryptionService(secret=secret)
     redactor = Redactor(secret=secret or SecretStr(""))
     sandbox_runtime = SandboxRuntimeContext(monty=MontyRuntime())
@@ -1123,7 +1129,6 @@ def create_app(
             agent_session_sweeper=agent_session_sweeper,
             experiment_sweeper=experiment_sweeper,
             media_sweeper=media_sweeper,
-            span_cost_calculator=span_cost_calculator,
             generative_model_store=generative_model_store,
             system_settings=system_settings,
             db_disk_usage_monitor=DbDiskUsageMonitor(db, email_sender),
