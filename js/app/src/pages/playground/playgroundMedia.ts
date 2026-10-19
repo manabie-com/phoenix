@@ -227,6 +227,17 @@ export const mediaContentPartInputs = (message: {
 export const REPLAYED_STORED_IMAGE_MEDIA_TYPE = "image/png";
 
 /**
+ * The media type a stored reference is replayed with when the request held it as a
+ * document.
+ *
+ * Advisory in the same way, and replaced by the stored bytes' own type. What it does
+ * decide is the part's kind, which the server keeps: replayed as an image, a stored
+ * PDF is sent to the provider as an image part, and refused. The only document type a
+ * run accepts is PDF, so the placeholder is also the right answer.
+ */
+export const REPLAYED_STORED_FILE_MEDIA_TYPE = "application/pdf";
+
+/**
  * How a message's text parts are rejoined into one editor's worth of text.
  *
  * A blank line between them, because a part boundary is a paragraph boundary in every

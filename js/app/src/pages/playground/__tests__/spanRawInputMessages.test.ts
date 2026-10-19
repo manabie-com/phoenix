@@ -94,6 +94,78 @@ describe("rawSpanInputMessages", () => {
     });
   });
 
+  it("reads a Google request whose file the server moved to the media store", () => {
+    const stored = `phoenix://media/${"a".repeat(64)}`;
+    const messages = rawSpanInputMessages(
+      attributes({
+        model: "gemini-2.5-flash",
+        contents: [
+          {
+            role: "user",
+            parts: [
+              { text: "Grade this paper" },
+              {
+                inline_data: {
+                  mime_type: "application/pdf",
+                  phoenix_media_url: stored,
+                },
+              },
+            ],
+          },
+        ],
+      })
+    );
+
+    expect(messages?.[0]).toMatchObject({
+      role: "user",
+      content: "Grade this paper",
+      files: [{ file: { url: stored, mediaType: "application/pdf" } }],
+    });
+  });
+
+  it("reads an OpenAI document the server moved to the media store as a document", () => {
+    // The reference carries no type, unlike the data URL it replaced. Read as an
+    // image, the run would send the PDF as an image part, which OpenAI refuses.
+    const stored = `phoenix://media/${"b".repeat(64)}`;
+    const completions = rawSpanInputMessages(
+      attributes({
+        messages: [
+          {
+            role: "user",
+            content: [
+              { type: "text", text: "Grade this paper" },
+              {
+                type: "file",
+                file: { filename: "paper.pdf", file_data: stored },
+              },
+            ],
+          },
+        ],
+      })
+    );
+    const responses = rawSpanInputMessages(
+      attributes({
+        input: [
+          {
+            role: "user",
+            type: "message",
+            content: [
+              { type: "input_text", text: "Grade this paper" },
+              { type: "input_file", filename: "paper.pdf", file_data: stored },
+            ],
+          },
+        ],
+      })
+    );
+
+    for (const messages of [completions, responses]) {
+      expect(messages?.[0]).toMatchObject({
+        files: [{ file: { url: stored, mediaType: "application/pdf" } }],
+      });
+      expect(messages?.[0]).not.toHaveProperty("images");
+    }
+  });
+
   it("reads an Anthropic request's base64 source and top-level system prompt", () => {
     const messages = rawSpanInputMessages(
       attributes({
