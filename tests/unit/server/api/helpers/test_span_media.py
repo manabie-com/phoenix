@@ -18,7 +18,6 @@ import base64
 import hashlib
 import inspect
 import json
-from collections import OrderedDict
 from datetime import datetime, timedelta, timezone
 from typing import Any, Optional
 
@@ -26,6 +25,7 @@ import pytest
 from sqlalchemy import select
 
 from phoenix.db import bulk_inserter, models
+from phoenix.db.bulk_inserter import BulkInserter
 from phoenix.db.insertion.span import insert_span as upstream_insert_span
 from phoenix.server import app
 from phoenix.server.api.helpers import span_media
@@ -114,6 +114,11 @@ def inserter_for(db: DbSessionFactory, **kwargs: Any) -> MediaOffloadingBulkInse
     return inserter
 
 
+async def uploads_done(inserter: MediaOffloadingBulkInserter) -> None:
+    if inserter._to_offload is not None:
+        await inserter._to_offload.join()
+
+
 async def ingest(db: DbSessionFactory, *spans: Span) -> None:
     """
     Insert spans the way the server does: queue each through the callable the inserter
@@ -126,7 +131,7 @@ async def ingest(db: DbSessionFactory, *spans: Span) -> None:
     try:
         for s in spans:
             await enqueue_span(s, "project")
-            await inserter._finish_uploads(timeout=30)
+            await uploads_done(inserter)
         await inserter._insert_spans(len(spans))
     finally:
         await inserter.__aexit__()
@@ -153,8 +158,6 @@ async def media_row(db: DbSessionFactory, sha256: str) -> Optional[models.MediaF
 @pytest.fixture
 def offload(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv(span_media.ENV_PHOENIX_SPAN_MEDIA_OFFLOAD, "true")
-    monkeypatch.setattr(span_media, "_paused_until", 0.0)
-    monkeypatch.setattr(span_media, "_recent", OrderedDict())
 
 
 @pytest.mark.usefixtures("offload")
@@ -487,7 +490,7 @@ class TestTheReceiverDoesNotWaitForUploads:
             await asyncio.wait_for(enqueue_span(span("a", call_llm_request()), "project"), 1)
             assert not inserter._spans  # still uploading, so not queued yet
             release.set()
-            await inserter._finish_uploads(timeout=30)
+            await uploads_done(inserter)
             await inserter._insert_spans(1)
         finally:
             await inserter.__aexit__()
@@ -514,9 +517,101 @@ class TestTheReceiverDoesNotWaitForUploads:
         try:
             await enqueue_span(span("a", "plain text"), "project")
             assert len(inserter._spans) == 1
-            assert not inserter._uploading
+            assert inserter._to_offload is not None and inserter._to_offload.empty()
         finally:
             await inserter.__aexit__()
+
+    async def test_many_media_spans_never_make_the_receiver_wait(
+        self, db: DbSessionFactory, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """More spans than upload workers: the receiver still returns at once for each."""
+        release = asyncio.Event()
+
+        async def held(content: bytes, **kwargs: Any) -> Optional[StoredMedia]:
+            await release.wait()
+            return await put_media(content, **kwargs)
+
+        monkeypatch.setattr(span_media, "put_media", held)
+        inserter = inserter_for(db)
+        _, enqueue_span, _ = await inserter.__aenter__()
+        ids = [f"s{i}" for i in range(20)]
+        try:
+            for span_id in ids:
+                await asyncio.wait_for(enqueue_span(span(span_id, call_llm_request()), "p"), 1)
+            release.set()
+            await uploads_done(inserter)
+            await inserter._insert_spans(len(ids))
+        finally:
+            await inserter.__aexit__()
+        for span_id in ids:
+            assert PDF_URL in await stored_input(db, span_id)
+
+    async def test_every_span_still_waiting_at_shutdown_is_queued_inline(
+        self, db: DbSessionFactory, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Including the ones no worker had started: none is dropped, whatever the drain."""
+
+        async def hangs(content: bytes, **kwargs: Any) -> Optional[StoredMedia]:
+            await asyncio.sleep(30)
+            return None
+
+        monkeypatch.setattr(span_media, "put_media", hangs)
+        inserter = inserter_for(db, shutdown_drain_sec=0)
+        _, enqueue_span, _ = await inserter.__aenter__()
+        request = call_llm_request()
+        for i in range(20):
+            await enqueue_span(span(f"s{i}", request), "project")
+        await inserter.__aexit__()
+        queued = [s.attributes["input"]["value"] for s, _ in inserter._spans]
+        assert queued == [request] * 20
+        assert inserter._offloading == 0
+
+    async def test_spans_waiting_to_upload_count_toward_is_full(
+        self, db: DbSessionFactory, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The receivers' backpressure has to see them, or the queue could grow unbounded."""
+        release = asyncio.Event()
+
+        async def held(content: bytes, **kwargs: Any) -> Optional[StoredMedia]:
+            await release.wait()
+            return await put_media(content, **kwargs)
+
+        monkeypatch.setattr(span_media, "put_media", held)
+        inserter = inserter_for(db, max_spans_queue_size=12)
+        _, enqueue_span, _ = await inserter.__aenter__()
+        try:
+            for i in range(12):
+                assert not inserter.is_full
+                await enqueue_span(span(f"s{i}", call_llm_request()), "project")
+            await asyncio.sleep(0)  # let the workers take their first spans
+            assert inserter.is_full
+            release.set()
+            await uploads_done(inserter)
+        finally:
+            await inserter.__aexit__()
+
+    async def test_shutdown_shares_one_deadline(
+        self, db: DbSessionFactory, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Uploads take at most half the drain; inserting gets what is left of it."""
+        drains: list[float] = []
+        upstream_aexit = BulkInserter.__aexit__
+
+        async def recording_aexit(self: BulkInserter, *args: Any) -> None:
+            drains.append(self._shutdown_drain_sec)
+            await upstream_aexit(self, *args)
+
+        async def hangs(content: bytes, **kwargs: Any) -> Optional[StoredMedia]:
+            await asyncio.sleep(30)
+            return None
+
+        monkeypatch.setattr(BulkInserter, "__aexit__", recording_aexit)
+        monkeypatch.setattr(span_media, "put_media", hangs)
+        inserter = inserter_for(db, shutdown_drain_sec=0.4)
+        _, enqueue_span, _ = await inserter.__aenter__()
+        await enqueue_span(span("a", call_llm_request()), "project")
+        await inserter.__aexit__()
+        assert len(drains) == 1 and 0 < drains[0] <= 0.21
 
 
 @pytest.mark.usefixtures("offload")
@@ -555,3 +650,69 @@ class TestCamelCase:
         await ingest(db, span("a", request))
         part = json.loads(await stored_input(db, "a"))["contents"][0]["parts"][0]
         assert part == {"inlineData": {"mimeType": "application/pdf", MEDIA_URL_KEY: PDF_URL}}
+
+
+@pytest.mark.usefixtures("offload")
+class TestEachAppHasItsOwnState:
+    """A process can hold more than one app; a file recorded in one database says nothing
+    about another, and one app's store failing should not pause the others."""
+
+    async def test_a_file_one_app_recorded_is_uploaded_again_by_another(
+        self, db: DbSessionFactory, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        uploads = 0
+
+        async def counting(content: bytes, **kwargs: Any) -> Optional[StoredMedia]:
+            nonlocal uploads
+            uploads += 1
+            return await put_media(content, **kwargs)
+
+        monkeypatch.setattr(span_media, "put_media", counting)
+        await ingest(db, span("a", call_llm_request()))
+        await ingest(db, span("b", call_llm_request()))
+        assert uploads == 2
+
+    async def test_one_app_pausing_does_not_pause_another(
+        self, db: DbSessionFactory, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        async def failing(content: bytes, **kwargs: Any) -> None:
+            raise RuntimeError("bucket unavailable")
+
+        monkeypatch.setattr(span_media, "put_media", failing)
+        await ingest(db, span("a", call_llm_request()))
+        monkeypatch.setattr(span_media, "put_media", put_media)
+        await ingest(db, span("b", call_llm_request()))
+        assert PDF_URL in await stored_input(db, "b")
+
+
+@pytest.mark.usefixtures("offload")
+class TestWorkerFailures:
+    async def test_an_unexpected_failure_keeps_the_span_inline_and_names_it(
+        self,
+        db: DbSessionFactory,
+        monkeypatch: pytest.MonkeyPatch,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        async def broken(self: Any, span: Span, candidates: Any) -> Span:
+            raise KeyError("unexpected attribute shape")
+
+        monkeypatch.setattr(span_media.SpanMediaOffloader, "offload", broken)
+        request = call_llm_request()
+        await ingest(db, span("a", request))
+        assert await stored_input(db, "a") == request
+        assert "span a" in caplog.text
+
+    async def test_each_span_is_scanned_once(
+        self, db: DbSessionFactory, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        scans = 0
+        upstream_candidates = span_media.SpanMediaOffloader.candidates
+
+        def counting(self: Any, span: Span) -> dict[str, str]:
+            nonlocal scans
+            scans += 1
+            return upstream_candidates(self, span)
+
+        monkeypatch.setattr(span_media.SpanMediaOffloader, "candidates", counting)
+        await ingest(db, span("a", call_llm_request()))
+        assert scans == 1
