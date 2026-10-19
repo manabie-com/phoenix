@@ -3,8 +3,9 @@ Inline media on an incoming span goes to the media store, and the span keeps a r
 
 A Gemini call grading a PDF records the whole paper, base64-encoded, in ``input.value``
 — on the ``invocation`` span and again on every ``call_llm`` span under it. On staging
-that made the ``spans`` table 44 GB. These tests drive spans through the bulk inserter,
-the path every ingested span takes, so they also prove the hook is wired in.
+that made the ``spans`` table 44 GB. These tests queue spans through the callable the
+bulk inserter hands the receivers and insert them with its own loop, the path every
+ingested span takes; ``TestWiring`` checks the app builds this inserter.
 
 The one thing that must never happen is a span losing its media: whatever cannot be
 stored stays inline, byte for byte.
@@ -15,19 +16,23 @@ A new test file on purpose (see .claude/rules/fork-ownership.md).
 import asyncio
 import base64
 import hashlib
+import inspect
 import json
+from collections import OrderedDict
 from datetime import datetime, timedelta, timezone
 from typing import Any, Optional
 
 import pytest
 from sqlalchemy import select
 
-from phoenix.db import models
-from phoenix.db.bulk_inserter import BulkInserter
+from phoenix.db import bulk_inserter, models
+from phoenix.db.insertion.span import insert_span as upstream_insert_span
+from phoenix.server import app
 from phoenix.server.api.helpers import span_media
 from phoenix.server.api.helpers.dataset_example_media import MEDIA_URL_KEY
 from phoenix.server.api.helpers.media import StoredMedia, put_media
 from phoenix.server.api.helpers.media_storage import media_store
+from phoenix.server.api.helpers.span_media import MediaOffloadingBulkInserter
 from phoenix.server.types import DbSessionFactory
 from phoenix.trace.schemas import Span, SpanContext, SpanKind, SpanStatusCode
 from tests.unit.media_store_fixtures import isolated_media_store  # noqa: F401
@@ -40,6 +45,8 @@ PDF_B64 = base64.urlsafe_b64encode(PDF).decode()
 PNG = base64.b64decode(
     "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8DwHwAFAAH/q842iQAAAABJRU5ErkJggg=="
 )
+# A PNG padded past the size worth offloading, so a span can carry a second file.
+PNG_B64 = base64.b64encode(PNG + b"\x00" * 40_000).decode()
 
 _START = datetime(2026, 10, 1, tzinfo=timezone.utc)
 
@@ -84,15 +91,35 @@ class _Events:
         pass
 
 
+async def _idle() -> None:
+    """Stands in for the inserter's background loop, so each test inserts when it says."""
+
+
+async def _refusing_png(content: bytes) -> Optional[StoredMedia]:
+    """A store that fails on PNGs and stores anything else."""
+    if content.startswith(b"\x89PNG"):
+        raise RuntimeError("bucket unavailable")
+    return await put_media(content)
+
+
 async def ingest(db: DbSessionFactory, *spans: Span) -> None:
-    """Insert spans the way the server does, through the bulk inserter's own loop."""
-    inserter = BulkInserter(
+    """
+    Insert spans the way the server does: queue each through the callable the inserter
+    hands the receivers, then run the inserter's own loop over them.
+    """
+    inserter = MediaOffloadingBulkInserter(
         db,
         event_queue=_Events(),
         span_cost_calculator=None,  # type: ignore[arg-type]  # no span here is priced
-        initial_batch_of_spans=[(s, "project") for s in spans],
     )
-    await inserter._insert_spans(len(spans))
+    inserter._bulk_insert = _idle  # type: ignore[method-assign]
+    _, enqueue_span, _ = await inserter.__aenter__()
+    try:
+        for s in spans:
+            await enqueue_span(s, "project")
+        await inserter._insert_spans(len(spans))
+    finally:
+        await inserter.__aexit__()
 
 
 async def stored_input(db: DbSessionFactory, span_id: str) -> str:
@@ -117,6 +144,7 @@ async def media_row(db: DbSessionFactory, sha256: str) -> Optional[models.MediaF
 def offload(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv(span_media.ENV_PHOENIX_SPAN_MEDIA_OFFLOAD, "true")
     monkeypatch.setattr(span_media, "_paused_until", 0.0)
+    monkeypatch.setattr(span_media, "_recent", OrderedDict())
 
 
 @pytest.mark.usefixtures("offload")
@@ -213,6 +241,24 @@ class TestThePaperLeavesTheSpan:
         for span_id in ("a", "b"):
             assert PDF_URL in await stored_input(db, span_id)
 
+    async def test_one_paper_on_many_spans_is_uploaded_once(
+        self, db: DbSessionFactory, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """An agent re-sends the same pages on every model call."""
+        uploads = 0
+
+        async def counting(content: bytes) -> Optional[StoredMedia]:
+            nonlocal uploads
+            uploads += 1
+            return await put_media(content)
+
+        monkeypatch.setattr(span_media, "put_media", counting)
+        spans = [span(span_id, call_llm_request()) for span_id in ("a", "b", "c")]
+        await ingest(db, *spans)
+        assert uploads == 1
+        for span_id in ("a", "b", "c"):
+            assert PDF_URL in await stored_input(db, span_id)
+
 
 class TestNothingIsLost:
     async def test_off_unless_enabled(self, db: DbSessionFactory) -> None:
@@ -275,15 +321,10 @@ class TestNothingIsLost:
         assert "cut off \\ud83d" in value
 
     @pytest.mark.usefixtures("offload")
-    async def test_one_file_the_store_refuses_does_not_hold_back_the_others(
+    async def test_files_stored_before_a_store_failure_stay_stored(
         self, db: DbSessionFactory, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        async def refuses_png(content: bytes) -> Optional[StoredMedia]:
-            if content.startswith(b"\x89PNG"):
-                raise RuntimeError("bucket unavailable")
-            return await put_media(content)
-
-        monkeypatch.setattr(span_media, "put_media", refuses_png)
+        monkeypatch.setattr(span_media, "put_media", _refusing_png)
         png = base64.b64encode(PNG).decode()
         request = json.loads(call_llm_request())
         request["contents"][0]["parts"].append(
@@ -295,6 +336,21 @@ class TestNothingIsLost:
         assert parts[2]["inline_data"]["data"] == png
         row = await media_row(db, PDF_SHA)
         assert row is not None and row.referenced_at is not None
+
+    @pytest.mark.usefixtures("offload")
+    async def test_files_after_a_store_failure_stay_inline_too(
+        self, db: DbSessionFactory, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The store just failed, so the rest of the span does not wait on it."""
+        monkeypatch.setattr(span_media, "put_media", _refusing_png)
+        png = base64.b64encode(PNG).decode()
+        request = json.loads(call_llm_request())
+        request["contents"][0]["parts"].insert(
+            1, {"inline_data": {"data": png, "mime_type": "image/png"}}
+        )
+        await ingest(db, span("a", json.dumps(request)))
+        assert await stored_input(db, "a") == json.dumps(request)
+        assert await media_row(db, PDF_SHA) is None
 
     @pytest.mark.usefixtures("offload")
     async def test_bytes_phoenix_does_not_store_stay_inline(self, db: DbSessionFactory) -> None:
@@ -334,3 +390,68 @@ class TestNothingIsLost:
         request = call_llm_request()
         await ingest(db, span("a", request))
         assert await stored_input(db, "a") == request
+
+    @pytest.mark.usefixtures("offload")
+    async def test_a_failure_recording_the_media_keeps_the_span_inline(
+        self, db: DbSessionFactory, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        async def failing(session: Any, media: StoredMedia, **kwargs: Any) -> None:
+            raise RuntimeError("lock timeout")
+
+        monkeypatch.setattr(span_media, "record_media", failing)
+        request = call_llm_request()
+        await ingest(db, span("a", request))
+        assert await stored_input(db, "a") == request
+        assert await media_row(db, PDF_SHA) is None
+
+
+@pytest.mark.usefixtures("offload")
+class TestUploadsHappenOutsideTheInsertTransaction:
+    async def test_every_upload_finishes_before_the_batch_inserts(
+        self, db: DbSessionFactory, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """
+        The insert loop holds one transaction across a batch. Uploading inside it would
+        hold the connection (and SQLite's write lock) through each upload in turn.
+        """
+        events: list[str] = []
+
+        async def recording_put(content: bytes) -> Optional[StoredMedia]:
+            events.append("upload")
+            return await put_media(content)
+
+        async def recording_insert(*args: Any, **kwargs: Any) -> Any:
+            events.append("insert")
+            return await upstream_insert_span(*args, **kwargs)
+
+        monkeypatch.setattr(span_media, "put_media", recording_put)
+        monkeypatch.setattr(bulk_inserter, "insert_span", recording_insert)
+        await ingest(
+            db, span("a", call_llm_request()), span("b", call_llm_request(PNG_B64, "image/png"))
+        )
+        assert events == ["upload", "upload", "insert", "insert"]
+
+
+class TestWiring:
+    async def test_the_receivers_are_handed_the_offloading_enqueue(
+        self, db: DbSessionFactory
+    ) -> None:
+        """Were upstream to rename `_enqueue_span`, the override would silently do nothing."""
+        inserter = MediaOffloadingBulkInserter(
+            db,
+            event_queue=_Events(),
+            span_cost_calculator=None,  # type: ignore[arg-type]
+        )
+        inserter._bulk_insert = _idle  # type: ignore[method-assign]
+        _, enqueue_span, _ = await inserter.__aenter__()
+        try:
+            assert getattr(enqueue_span, "__func__", None) is (
+                MediaOffloadingBulkInserter._enqueue_span
+            )
+        finally:
+            await inserter.__aexit__()
+
+    def test_the_app_builds_the_offloading_inserter_by_default(self) -> None:
+        """`create_app` builds it unless a caller, such as the test suite, passes its own."""
+        source = inspect.getsource(app.create_app)
+        assert "bulk_inserter_factory or MediaOffloadingBulkInserter" in source

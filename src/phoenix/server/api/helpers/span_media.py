@@ -8,15 +8,15 @@ span beneath it. On the staging deployment that grew the ``spans`` table to 44 G
 of it TOAST, and one attribute filter over a week of a 689-span project took 21 seconds:
 Postgres decompresses a span's entire ``attributes`` value to read any key of it.
 
-So before a span is inserted, inline media in its ``input.value`` and ``output.value``
-goes to the media store (GCS in a deployment) and is replaced by a
+So as a span is queued for insertion, inline media in its ``input.value`` and
+``output.value`` goes to the media store (GCS in a deployment) and is replaced by a
 ``phoenix://media/<sha256>`` reference — the same rewrite, through the same walker, as
 copying a span into a dataset (see ``dataset_example_media``). The span view and
 playground replay draw the reference wherever they would have drawn the bytes.
 
-Wired in by one import in ``bulk_inserter`` that rebinds its ``insert_span`` to
-:func:`insert_span_storing_media`, so upstream's call site — which upstream keeps
-reworking — is never edited and cannot conflict.
+Wired in by :class:`MediaOffloadingBulkInserter`, which ``create_app`` builds in place
+of upstream's ``BulkInserter``: upstream's insert loop, which upstream keeps reworking,
+is not edited at all.
 
 Off unless ``PHOENIX_SPAN_MEDIA_OFFLOAD=true``. Without a bucket the store is the local
 filesystem, which in a container does not outlive the pod, so turning this on is a
@@ -38,18 +38,19 @@ file's lifetime to its traces' retention is a feature of its own.
 """
 
 import asyncio
+import hashlib
 import json
 import logging
 import os
+from collections import OrderedDict
 from dataclasses import replace
 from time import monotonic
 from typing import Any, Mapping, Optional
 
 from openinference.semconv.trace import SpanAttributes
-from sqlalchemy.ext.asyncio import AsyncSession
 from typing_extensions import TypeGuard
 
-from phoenix.db.insertion.span import SpanInsertionEvent, insert_span
+from phoenix.db.bulk_inserter import BulkInserter
 from phoenix.server.api.helpers.dataset_example_media import MediaStorer, replace_inline_media
 from phoenix.server.api.helpers.media import (
     StoredMedia,
@@ -57,6 +58,7 @@ from phoenix.server.api.helpers.media import (
     put_media,
     record_media,
 )
+from phoenix.server.types import DbSessionFactory
 from phoenix.trace.attributes import get_attribute_value
 from phoenix.trace.schemas import Span
 
@@ -102,39 +104,96 @@ value cannot be rewritten says nothing about the next one.
 
 _paused_until = 0.0
 
+_RECENT_CAPACITY = 1024
+"""
+How many recently recorded files are remembered, so the same file is not uploaded again.
+
+An agent sends the same pages on every model call, and the ``invocation`` span repeats
+them, so one paper arrives many times in a row. A remembered file is safe to reuse: it
+was recorded and stamped as used, and the sweeper never deletes a used file.
+"""
+
+_recent: "OrderedDict[str, StoredMedia]" = OrderedDict()
+
 
 def get_env_span_media_offload() -> bool:
     """Whether inline media on incoming spans is moved to the media store."""
     return os.environ.get(ENV_PHOENIX_SPAN_MEDIA_OFFLOAD, "").strip().lower() == "true"
 
 
-async def insert_span_storing_media(
-    session: AsyncSession,
-    span: Span,
-    project_name: str,
-) -> Optional[SpanInsertionEvent]:
+class MediaOffloadingBulkInserter(BulkInserter):
     """
-    :func:`insert_span`, with the span's inline media moved to the media store first.
+    The bulk inserter, with each span's inline media moved to the media store as it is
+    queued.
 
-    The bytes are stored before anything touches the session, so the timeout can only
-    ever abandon a store write. The ``media_files`` rows are written in the caller's
-    transaction, beside the span: if the span does not go in, neither do they.
+    Queued rather than inserted: the insert loop holds one transaction across a whole
+    batch and inserts its spans one after another, so uploading there would hold the
+    connection — and on SQLite the write lock — through every upload in the batch, in
+    turn. A span being queued has no transaction yet, and the receivers queue from their
+    own tasks, so uploads for different requests also run concurrently. OTLP over HTTP
+    queues after it has responded; a gRPC export waits for its uploads.
+
+    ``create_app`` builds this by default, so upstream's insert loop is untouched.
+    """
+
+    async def _enqueue_span(self, span: Span, project_name: str) -> None:
+        await super()._enqueue_span(await offload_span_media(self._db, span), project_name)
+
+
+async def offload_span_media(db: DbSessionFactory, span: Span) -> Span:
+    """
+    The span with its inline media moved to the media store, or the span unchanged.
+
+    The bytes are stored first, then their ``media_files`` rows are written and stamped
+    as used in one short transaction of their own. If that fails the span keeps its
+    media inline: nothing references the stored bytes, and the span is not lost. If the
+    span itself later fails to insert, the rows stay, marked used: a few kept files, never
+    a missing one.
 
     Args:
-        session: The bulk inserter's session.
+        db: Session factory for the ``media_files`` rows.
         span: The span as received.
-        project_name: The project to insert it into.
 
     Returns:
-        What :func:`insert_span` returns.
+        The span to queue.
     """
-    span, stored = await _offloaded(span)
-    if stored:
-        unique = {media.sha256: media for media in stored}.values()
-        for media in unique:
-            await record_media(session, media)
-        await mark_media_referenced(session, [media.url for media in unique])
-    return await insert_span(session, span, project_name)
+    offloaded, stored = await _offloaded(span)
+    if not stored:
+        return span
+    # One row per file, in a fixed order, so concurrent spans carrying the same files
+    # take their row locks in the same order and cannot deadlock.
+    unique = sorted({media.sha256: media for media in stored}.values(), key=_by_sha256)
+    try:
+        async with db() as session:
+            for media in unique:
+                await record_media(session, media)
+            await mark_media_referenced(session, [media.url for media in unique])
+    except Exception:
+        logger.exception(
+            f"Failed to record stored media for span {span.context.span_id}; keeping it inline"
+        )
+        return span
+    for media in unique:
+        _remember(media)
+    return offloaded
+
+
+def _by_sha256(media: StoredMedia) -> str:
+    return media.sha256
+
+
+def _remember(media: StoredMedia) -> None:
+    _recent[media.sha256] = media
+    _recent.move_to_end(media.sha256)
+    while len(_recent) > _RECENT_CAPACITY:
+        _recent.popitem(last=False)
+
+
+def _recalled(content: bytes) -> Optional[StoredMedia]:
+    media = _recent.get(hashlib.sha256(content).hexdigest())
+    if media is not None:
+        _recent.move_to_end(media.sha256)
+    return media
 
 
 async def _offloaded(span: Span) -> tuple[Span, list[StoredMedia]]:
@@ -153,9 +212,13 @@ async def _offloaded(span: Span) -> tuple[Span, list[StoredMedia]]:
     stored: list[StoredMedia] = []
 
     async def store(content: bytes) -> Optional[StoredMedia]:
-        # A file the store does not take stays inline, and the rest of the span still
-        # moves: each replacement is independent of the others.
+        # When the store fails, that file stays inline and so does every file after it
+        # until the pause ends, in this span and the next: it is the store that failed.
+        # Files this span already stored stay stored.
         global _paused_until
+        if (media := _recalled(content)) is not None:
+            stored.append(media)
+            return media
         if _store_paused():
             return None
         try:

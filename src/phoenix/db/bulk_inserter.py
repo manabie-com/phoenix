@@ -41,9 +41,6 @@ from phoenix.server.prometheus import (
 from phoenix.server.types import CanPutItem, DbSessionFactory
 from phoenix.trace.schemas import Span
 
-# Fork: rebinds insert_span on purpose, so spans' inline media is stored first (span_media.py)
-from ..server.api.helpers.span_media import insert_span_storing_media as insert_span  # noqa: F811
-
 logger = logging.getLogger(__name__)
 
 

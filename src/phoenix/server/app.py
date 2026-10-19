@@ -194,6 +194,8 @@ from phoenix.tracers import Tracer
 from phoenix.utilities.client import PHOENIX_SERVER_VERSION_HEADER
 from phoenix.version import __version__ as phoenix_version
 
+from .api.helpers.span_media import MediaOffloadingBulkInserter
+
 if TYPE_CHECKING:
     from opentelemetry.trace import TracerProvider
 
@@ -966,7 +968,7 @@ def create_app(
 ) -> FastAPI:
     verify_server_environment_variables()
     _validate_oauth2_idp_names(oauth2_client_configs or [])
-    bulk_inserter_factory = bulk_inserter_factory or BulkInserter
+    bulk_inserter_factory = bulk_inserter_factory or MediaOffloadingBulkInserter
     startup_callbacks_list: list[_Callback] = list(startup_callbacks)
     shutdown_callbacks_list: list[_Callback] = list(shutdown_callbacks)
     startup_callbacks_list.append(Facilitator(db=db))
