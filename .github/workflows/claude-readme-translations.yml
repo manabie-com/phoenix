@@ -1,10 +1,13 @@
 name: Sync README Translations
 
 on:
-  push:
-    branches: [main]
-    paths:
-      - README.md
+  # Daily rather than on push: claude-code-action rejects `push` events
+  # ("Unsupported event type: push"), and each run syncs every README.md change
+  # since the translations were last updated, so a daily batch loses nothing
+  # and turns several README edits into one translation run. Days without a
+  # README.md change exit at the diff step before Claude is invoked.
+  schedule:
+    - cron: "0 9 * * *"
   workflow_dispatch:
     inputs:
       base:
@@ -22,6 +25,8 @@ concurrency:
 
 jobs:
   sync:
+    outputs:
+      pr: ${{ steps.publish.outputs.pr }}
     runs-on: ubuntu-latest
     timeout-minutes: 60
     permissions:
@@ -123,6 +128,7 @@ jobs:
           claude_args: '--allowedTools Read,Write,Edit,Glob,Grep,Agent,"Bash(git diff:*)","Bash(git log:*)","Bash(git show:*)","Bash(git status:*)","Bash(python3 scripts/check_readme_translations.py:*)","Bash(ls:*)","Bash(wc:*)"'
 
       - name: Commit and open pull request
+        id: publish
         if: steps.diff.outputs.changed == 'true' && steps.claude.outcome == 'success'
         env:
           # Separate publishing token; the claude-code-action app token has
@@ -164,3 +170,26 @@ jobs:
               --title "docs: sync README translations" \
               --body-file "$BODY_FILE"
           fi
+          # Auto-merge once a reviewer approves and checks pass.
+          gh pr merge "$BRANCH" --auto --squash || echo "::warning::Could not enable auto-merge on $BRANCH"
+          echo "pr=$BRANCH" >> "$GITHUB_OUTPUT"
+
+  approve:
+    needs: sync
+    if: needs.sync.outputs.pr != ''
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout trusted approval action
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+
+      - name: Approve pull request
+        uses: ./.github/actions/approve-automation-pr
+        with:
+          pr: ${{ needs.sync.outputs.pr }}
+          token: ${{ secrets.AUTOMATION_APPROVER_TOKEN }}
