@@ -148,6 +148,11 @@ class MediaOffloadingBulkInserter(BulkInserter):
     Uploads are workers reading a queue rather than a task per span, so a span not yet
     started is data that shutdown can still queue, not a task cancelled before it ran.
 
+    A span carrying media therefore reaches the insert queue after spans received later
+    that carry none, so a child can be inserted after its parent. Upstream already
+    expects either order (OTLP gives no order, and parents usually arrive last) and
+    propagates a late child's cumulative counts to its ancestors.
+
     Overrides upstream's private ``_enqueue_span``, the callable ``__aenter__`` hands
     every receiver. ``TestWiring`` fails if a rename upstream leaves this unused.
     """
@@ -206,10 +211,16 @@ class MediaOffloadingBulkInserter(BulkInserter):
     async def __aexit__(self, *args: Any) -> None:
         # One deadline for both phases, so shutdown takes no longer than configured: up to
         # half for uploads in progress, the rest for inserting what they produced.
-        deadline = monotonic() + self._shutdown_drain_sec
-        await self._finish_offloads(self._shutdown_drain_sec / 2)
+        # Upstream's drain reads the attribute, so it carries the remainder for that phase
+        # only and is put back afterwards.
+        configured = self._shutdown_drain_sec
+        deadline = monotonic() + configured
+        await self._finish_offloads(configured / 2)
         self._shutdown_drain_sec = max(0.0, deadline - monotonic())
-        await super().__aexit__(*args)
+        try:
+            await super().__aexit__(*args)
+        finally:
+            self._shutdown_drain_sec = configured
 
     async def _finish_offloads(self, timeout: float) -> None:
         """Let the workers finish within ``timeout``, then queue the rest with media inline."""
@@ -243,6 +254,8 @@ class SpanMediaOffloader:
         self._db = db
         self._paused_until = 0.0
         self._recent: "OrderedDict[str, StoredMedia]" = OrderedDict()
+        self._uploading: "dict[str, asyncio.Future[Optional[StoredMedia]]]" = {}
+        """Files being uploaded right now, so a span carrying one too waits for that upload."""
 
     def candidates(self, span: Span) -> dict[str, str]:
         """The span's values worth rewriting, or none when offloading is off or paused."""
@@ -305,31 +318,29 @@ class SpanMediaOffloader:
         span_id = span.context.span_id
         stored: list[StoredMedia] = []
         uploaded: list[StoredMedia] = []
+        seen: dict[str, StoredMedia] = {}
+        """Files this span already stored, for a file it carries more than once."""
 
         async def store(content: bytes) -> Optional[StoredMedia]:
             # When the store fails, that file stays inline and so does every file after it
             # until the pause ends, in this span and the next: it is the store that
             # failed. Files this span already stored stay stored.
             sha256 = await _sha256(content)
-            if (media := self._recall(sha256)) is not None:
+            if (media := self._recall(sha256) or seen.get(sha256)) is not None:
                 stored.append(media)
                 return media
-            if self._store_paused():
+            if (in_progress := self._uploading.get(sha256)) is not None:
+                # Another span is uploading the same file. Its result is shared, and this
+                # span still records its own row, so it does not depend on the other.
+                media = await asyncio.shield(in_progress)
+            elif self._store_paused():
                 return None
-            try:
-                media = await asyncio.wait_for(
-                    put_media(content, sha256=sha256), _STORE_TIMEOUT_SECONDS
-                )
-            except Exception:
-                self._paused_until = monotonic() + _PAUSE_SECONDS
-                logger.exception(
-                    f"Failed to store inline media from span {span_id}; keeping it inline, "
-                    f"as will spans for the next {_PAUSE_SECONDS:.0f}s"
-                )
-                return None
+            else:
+                media = await self._upload(span_id, content, sha256)
             if media is not None:
                 stored.append(media)
                 uploaded.append(media)
+                seen[sha256] = media
             return media
 
         attributes = span.attributes
@@ -356,6 +367,31 @@ class SpanMediaOffloader:
         if not stored:
             return span, [], []
         return replace(span, attributes=attributes), stored, uploaded
+
+    async def _upload(self, span_id: str, content: bytes, sha256: str) -> Optional[StoredMedia]:
+        """Upload one file, letting any span that needs it meanwhile wait for the result."""
+        result: "asyncio.Future[Optional[StoredMedia]]" = asyncio.get_running_loop().create_future()
+        self._uploading[sha256] = result
+        media: Optional[StoredMedia] = None
+        try:
+            media = await asyncio.wait_for(
+                put_media(content, sha256=sha256), _STORE_TIMEOUT_SECONDS
+            )
+        except Exception:
+            self._paused_until = monotonic() + _PAUSE_SECONDS
+            logger.exception(
+                f"Failed to store inline media from span {span_id}; keeping it inline, "
+                f"as will spans for the next {_PAUSE_SECONDS:.0f}s"
+            )
+        finally:
+            # Settled however the upload ends, cancellation included, so no waiter hangs.
+            # Nothing here may raise: an error raised while a worker is being cancelled
+            # would replace the cancellation, and the worker would never stop.
+            if self._uploading.get(sha256) is result:
+                del self._uploading[sha256]
+            if not result.done():
+                result.set_result(media)
+        return media
 
     def _store_paused(self) -> bool:
         return monotonic() < self._paused_until

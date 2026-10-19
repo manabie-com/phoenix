@@ -18,6 +18,7 @@ import base64
 import hashlib
 import inspect
 import json
+from dataclasses import replace
 from datetime import datetime, timedelta, timezone
 from typing import Any, Optional
 
@@ -612,6 +613,7 @@ class TestTheReceiverDoesNotWaitForUploads:
         await enqueue_span(span("a", call_llm_request()), "project")
         await inserter.__aexit__()
         assert len(drains) == 1 and 0 < drains[0] <= 0.21
+        assert inserter._shutdown_drain_sec == 0.4  # the configured value is put back
 
 
 @pytest.mark.usefixtures("offload")
@@ -716,3 +718,130 @@ class TestWorkerFailures:
         monkeypatch.setattr(span_media.SpanMediaOffloader, "candidates", counting)
         await ingest(db, span("a", call_llm_request()))
         assert scans == 1
+
+
+@pytest.mark.usefixtures("offload")
+class TestOneUploadPerFile:
+    async def test_a_file_repeated_within_one_span_is_uploaded_once(
+        self, db: DbSessionFactory, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        uploads = 0
+
+        async def counting(content: bytes, **kwargs: Any) -> Optional[StoredMedia]:
+            nonlocal uploads
+            uploads += 1
+            return await put_media(content, **kwargs)
+
+        monkeypatch.setattr(span_media, "put_media", counting)
+        request = json.loads(call_llm_request())
+        parts = request["contents"][0]["parts"]
+        parts.append(parts[1])  # the same page, sent twice in one request
+        await ingest(db, span("a", json.dumps(request)))
+        assert uploads == 1
+        stored = json.loads(await stored_input(db, "a"))["contents"][0]["parts"]
+        assert [part["inline_data"][MEDIA_URL_KEY] for part in stored[1:]] == [PDF_URL] * 2
+
+    async def test_spans_carrying_the_same_file_at_once_share_one_upload(
+        self, db: DbSessionFactory, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """An export carries the invocation and its model calls together, same pages."""
+        uploads = 0
+        release = asyncio.Event()
+
+        async def held(content: bytes, **kwargs: Any) -> Optional[StoredMedia]:
+            nonlocal uploads
+            uploads += 1
+            await release.wait()
+            return await put_media(content, **kwargs)
+
+        monkeypatch.setattr(span_media, "put_media", held)
+        inserter = inserter_for(db)
+        _, enqueue_span, _ = await inserter.__aenter__()
+        ids = [f"s{i}" for i in range(5)]
+        try:
+            for span_id in ids:
+                await enqueue_span(span(span_id, call_llm_request()), "project")
+            for _ in range(20):
+                await asyncio.sleep(0)  # let every worker reach the store
+            release.set()
+            await uploads_done(inserter)
+            await inserter._insert_spans(len(ids))
+        finally:
+            await inserter.__aexit__()
+        assert uploads == 1
+        for span_id in ids:
+            assert PDF_URL in await stored_input(db, span_id)
+
+
+@pytest.mark.usefixtures("offload")
+class TestOrder:
+    async def test_a_child_queued_after_its_parent_still_counts_toward_it(
+        self, db: DbSessionFactory, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """
+        A span with media is queued once its upload ends, so its parent, received later
+        but carrying none, is inserted first. Upstream propagates the late child's
+        cumulative counts to the parent.
+        """
+        release = asyncio.Event()
+
+        async def held(content: bytes, **kwargs: Any) -> Optional[StoredMedia]:
+            await release.wait()
+            return await put_media(content, **kwargs)
+
+        monkeypatch.setattr(span_media, "put_media", held)
+        child = replace(
+            span("child", call_llm_request(), trace_id="ordered"),
+            parent_id="parent",
+            attributes={
+                "input": {"value": call_llm_request(), "mime_type": "application/json"},
+                "llm": {"token_count": {"prompt": 100, "completion": 7}},
+            },
+        )
+        parent = replace(span("parent", "no media", trace_id="ordered"), name="invocation")
+        inserter = inserter_for(db)
+        _, enqueue_span, _ = await inserter.__aenter__()
+        try:
+            await enqueue_span(child, "project")
+            await enqueue_span(parent, "project")
+            release.set()
+            await uploads_done(inserter)
+            assert [s.context.span_id for s, _ in inserter._spans] == ["parent", "child"]
+            await inserter._insert_spans(2)
+        finally:
+            await inserter.__aexit__()
+        async with db() as session:
+            row = (
+                await session.execute(
+                    select(
+                        models.Span.cumulative_llm_token_count_prompt,
+                        models.Span.cumulative_llm_token_count_completion,
+                    ).where(models.Span.span_id == "parent")
+                )
+            ).one()
+        assert tuple(row) == (100, 7)
+        assert PDF_URL in await stored_input(db, "child")
+
+
+@pytest.mark.usefixtures("offload")
+class TestBothSpellings:
+    async def test_a_part_with_both_spellings_has_both_moved(self, db: DbSessionFactory) -> None:
+        request = json.dumps(
+            {
+                "contents": [
+                    {
+                        "role": "user",
+                        "parts": [
+                            {
+                                "inline_data": {"mime_type": "application/pdf", "data": PDF_B64},
+                                "inlineData": {"mimeType": "application/pdf", "data": PDF_B64},
+                            }
+                        ],
+                    }
+                ]
+            }
+        )
+        await ingest(db, span("a", request))
+        part = json.loads(await stored_input(db, "a"))["contents"][0]["parts"][0]
+        assert part["inline_data"][MEDIA_URL_KEY] == PDF_URL
+        assert part["inlineData"][MEDIA_URL_KEY] == PDF_URL

@@ -233,15 +233,16 @@ def _decode_inline_payload(payload: str) -> Optional[bytes]:
         return None
 
 
-def _inline_data_key(value: Any) -> Optional[str]:
-    """The key holding a provider's inline-bytes part, if the mapping is one."""
+def _inline_data_keys(value: Any) -> list[str]:
+    """The keys holding a provider's inline-bytes part, if the mapping is one."""
     if not isinstance(value, Mapping):
-        return None
-    for key in _INLINE_DATA_KEYS:
-        inline = value.get(key)
-        if isinstance(inline, Mapping) and isinstance(inline.get(_INLINE_PAYLOAD_KEY), str):
-            return key
-    return None
+        return []
+    return [
+        key
+        for key in _INLINE_DATA_KEYS
+        if isinstance(inline := value.get(key), Mapping)
+        and isinstance(inline.get(_INLINE_PAYLOAD_KEY), str)
+    ]
 
 
 async def externalize_inline_media(session: AsyncSession, value: Any) -> Any:
@@ -330,15 +331,13 @@ async def _externalize(store: MediaStorer, value: Any, depth: int) -> Any:
         # walked too. Returning early here would leave a `data:` URL sitting
         # beside the payload untouched, and would skip the rest of the mapping
         # entirely whenever the payload could not be decoded.
-        inline_key = _inline_data_key(value)
-        replacement = (
-            await _externalized_inline_payload(store, value[inline_key])
-            if inline_key is not None
-            else None
-        )
+        replacements = {
+            key: await _externalized_inline_payload(store, value[key])
+            for key in _inline_data_keys(value)
+        }
         return {
             key: replacement
-            if key == inline_key and replacement is not None
+            if (replacement := replacements.get(key)) is not None
             else await _externalize(store, item, depth + 1)
             for key, item in value.items()
         }
