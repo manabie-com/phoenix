@@ -16,7 +16,11 @@ from typing import TYPE_CHECKING, Any, Iterable, Literal, Mapping, Optional, Uni
 from sqlalchemy.ext.asyncio import AsyncSession
 from typing_extensions import Required, TypeAlias, TypedDict
 
-from phoenix.db.types.media import MediaContent
+from phoenix.db.types.media import (
+    SUPPORTED_FILE_MEDIA_TYPES,
+    SUPPORTED_IMAGE_MEDIA_TYPES,
+    MediaContent,
+)
 from phoenix.db.types.media_parts import MediaContentPart, media_source
 from phoenix.server.api.exceptions import BadRequest
 from phoenix.server.api.helpers.media import (
@@ -222,7 +226,7 @@ async def resolve_message_media(
             media = resolved[block["url"]]
             resolved_block = MediaContentBlock(
                 type="media",
-                kind=block["kind"],
+                kind=_resolved_kind(media.media_type, block["kind"]),
                 url=block["url"],
                 media_type=media.media_type,
                 data=media.content,
@@ -234,6 +238,26 @@ async def resolve_message_media(
             blocks.append(resolved_block)
         output.append({**message, "content": blocks})
     return output
+
+
+def _resolved_kind(
+    media_type: str,
+    declared: Literal["image", "file"],
+) -> Literal["image", "file"]:
+    """
+    The content part resolved media is sent as: whatever its own type says it is.
+
+    A stored reference carries no type, so a client replaying one guesses the part, and a
+    `file_data` that held an image, or an image part that held a PDF, guesses wrong. The
+    provider would then be sent an image part holding a PDF, and refuse it. The type held
+    against the bytes is authoritative, so it decides; the declared kind only stands for a
+    type neither set knows, which the provider module rejects with a clear error.
+    """
+    if media_type.lower() in SUPPORTED_IMAGE_MEDIA_TYPES:
+        return "image"
+    if media_type.lower() in SUPPORTED_FILE_MEDIA_TYPES:
+        return "file"
+    return declared
 
 
 def _media_variable_value(

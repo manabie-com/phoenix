@@ -26,6 +26,12 @@ It never costs a span its media. Anything that cannot be stored — a type Phoen
 store, a payload that does not decode, a store that errors or is slow — stays inline,
 exactly as it arrived.
 
+Whatever reads ``input.value`` / ``output.value`` back — the span view, REST and client
+span exports, evals over exported traces — gets the reference, not the bytes. Phoenix's
+own views and replay resolve it; an outside reader fetches ``GET /v1/media/<sha256>``. A
+rewritten value is also re-serialised compactly, so it is no longer byte-identical to
+what the app sent; a value with nothing stored keeps its exact text.
+
 Media a span references is stamped as used, so the sweeper keeps it, and keeps it for
 good: the sweeper cannot afford to scan spans (see ``mark_media_referenced``), so tying a
 file's lifetime to its traces' retention is a feature of its own.
@@ -73,22 +79,25 @@ Shorter values are not parsed at all. Nothing that small is worth a store round 
 and it keeps the cost of this module at one length check for almost every span.
 """
 
-_MARKERS = ('"inline_data"', "data:")
+_MARKERS = ('"inline_data"', "data:image/", "data:application/pdf")
 """
 A value is parsed only if it holds one of the shapes the walker replaces: a Gemini
-inline part or a ``data:`` URL. A false positive (``"metadata:"``) costs one parse.
+inline part, or a ``data:`` URL of a type Phoenix stores. A bare ``"data:"`` would match
+every ``metadata:`` in a large log or prompt and parse it for nothing.
 """
 
 _STORE_TIMEOUT_SECONDS = 10.0
 """
-How long one span may wait on the store. Ingestion inserts spans one after another, so a
-store that hangs would otherwise stall every span queued behind this one.
+How long one file may wait on the store. Ingestion inserts spans one after another, so a
+store that hangs would otherwise stall every span queued behind this one. Per file rather
+than per span, so a span carrying many images is not timed out for their total.
 """
 
 _PAUSE_SECONDS = 60.0
 """
-After a failure, spans go in inline for this long rather than each waiting out the
-timeout against a store that is down.
+After the store fails, spans go in inline for this long rather than each waiting out the
+timeout against a store that is down. Only a store failure pauses: a span whose own
+value cannot be rewritten says nothing about the next one.
 """
 
 _paused_until = 0.0
@@ -130,8 +139,7 @@ async def insert_span_storing_media(
 
 async def _offloaded(span: Span) -> tuple[Span, list[StoredMedia]]:
     """The span with its inline media replaced, and the media that replaced it."""
-    global _paused_until
-    if not get_env_span_media_offload() or monotonic() < _paused_until:
+    if not get_env_span_media_offload() or _store_paused():
         return span, []
     candidates: dict[str, str] = {}
     for key in _ATTRIBUTES:
@@ -141,40 +149,50 @@ async def _offloaded(span: Span) -> tuple[Span, list[StoredMedia]]:
     if not candidates:
         return span, []
 
+    span_id = span.context.span_id
     stored: list[StoredMedia] = []
 
     async def store(content: bytes) -> Optional[StoredMedia]:
-        media = await put_media(content)
+        # A file the store does not take stays inline, and the rest of the span still
+        # moves: each replacement is independent of the others.
+        global _paused_until
+        if _store_paused():
+            return None
+        try:
+            media = await asyncio.wait_for(put_media(content), _STORE_TIMEOUT_SECONDS)
+        except Exception:
+            _paused_until = monotonic() + _PAUSE_SECONDS
+            logger.exception(
+                f"Failed to store inline media from span {span_id}; keeping it inline, "
+                f"as will spans for the next {_PAUSE_SECONDS:.0f}s"
+            )
+            return None
         if media is not None:
             stored.append(media)
         return media
 
-    async def replace_all() -> dict[str, str]:
-        replacements = {}
-        for key, value in candidates.items():
-            before = len(stored)
-            replaced = await _replace_in_value(store, value)
-            # Rewritten only if something was stored, so a value with nothing to replace
-            # keeps its exact original text rather than a re-serialisation of it.
-            if len(stored) > before:
-                replacements[key] = replaced
-        return replacements
-
-    try:
-        replacements = await asyncio.wait_for(replace_all(), _STORE_TIMEOUT_SECONDS)
-    except Exception:
-        _paused_until = monotonic() + _PAUSE_SECONDS
-        logger.exception(
-            f"Failed to move inline media on span {span.context.span_id} to the media "
-            f"store; keeping it inline, as will spans for the next {_PAUSE_SECONDS:.0f}s"
-        )
-        return span, []
-    if not replacements:
-        return span, []
     attributes = span.attributes
-    for key, value in replacements.items():
-        attributes = _with_attribute(attributes, key, value)
+    for key, value in candidates.items():
+        before = len(stored)
+        try:
+            replaced = await _replace_in_value(store, value)
+        except Exception:
+            # The value itself, not the store, e.g. JSON nested past the recursion limit.
+            # It stays as it arrived; anything already stored for it is left unrecorded.
+            logger.warning(f"Could not rewrite {key} of span {span_id}; keeping it inline")
+            del stored[before:]
+            continue
+        # Rewritten only if something was stored, so a value with nothing to replace
+        # keeps its exact original text rather than a re-serialisation of it.
+        if len(stored) > before:
+            attributes = _with_attribute(attributes, key, replaced)
+    if not stored:
+        return span, []
     return replace(span, attributes=attributes), stored
+
+
+def _store_paused() -> bool:
+    return monotonic() < _paused_until
 
 
 def _worth_parsing(value: Any) -> TypeGuard[str]:
@@ -193,7 +211,15 @@ async def _replace_in_value(store: MediaStorer, value: str) -> str:
         replaced = await replace_inline_media(store, value)
         return replaced if isinstance(replaced, str) else value
     replaced = await replace_inline_media(store, parsed)
-    return json.dumps(replaced, ensure_ascii=False, separators=(",", ":"))
+    text = json.dumps(replaced, ensure_ascii=False, separators=(",", ":"))
+    try:
+        text.encode("utf-8")
+    except UnicodeEncodeError:
+        # A lone surrogate, which the original could only have held as a \u escape (a
+        # truncated emoji, say). Written out raw it is not UTF-8 and the span could not
+        # be stored at all, so it stays escaped.
+        text = json.dumps(replaced, separators=(",", ":"))
+    return text
 
 
 def _with_attribute(attributes: Mapping[str, Any], key: str, value: Any) -> dict[str, Any]:

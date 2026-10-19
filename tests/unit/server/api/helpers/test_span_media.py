@@ -26,6 +26,7 @@ from phoenix.db import models
 from phoenix.db.bulk_inserter import BulkInserter
 from phoenix.server.api.helpers import span_media
 from phoenix.server.api.helpers.dataset_example_media import MEDIA_URL_KEY
+from phoenix.server.api.helpers.media import StoredMedia, put_media
 from phoenix.server.api.helpers.media_storage import media_store
 from phoenix.server.types import DbSessionFactory
 from phoenix.trace.schemas import Span, SpanContext, SpanKind, SpanStatusCode
@@ -230,10 +231,70 @@ class TestNothingIsLost:
     async def test_a_value_with_nothing_to_store_keeps_its_exact_text(
         self, db: DbSessionFactory
     ) -> None:
-        """Matches a marker ("metadata:") but holds no media, so it is not re-serialised."""
-        request = json.dumps({"prompt": "metadata: " + "words " * 10_000}, indent=2)
+        """Mentions a data URL, so it is parsed, but holds none, so it is not rewritten."""
+        prose = "paste it as data:image/png;base64,... in the field. " + "words " * 10_000
+        request = json.dumps({"prompt": prose}, indent=2)
         await ingest(db, span("a", request))
         assert await stored_input(db, "a") == request
+
+    @pytest.mark.usefixtures("offload")
+    async def test_text_that_only_says_metadata_is_not_parsed(
+        self, db: DbSessionFactory, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        parsed = 0
+
+        async def counting(store: Any, value: str) -> str:
+            nonlocal parsed
+            parsed += 1
+            return value
+
+        monkeypatch.setattr(span_media, "_replace_in_value", counting)
+        request = json.dumps({"log": "metadata: " + "words " * 10_000})
+        await ingest(db, span("a", request))
+        assert parsed == 0
+        assert await stored_input(db, "a") == request
+
+    @pytest.mark.usefixtures("offload")
+    async def test_a_value_it_cannot_parse_stays_inline_without_pausing(
+        self, db: DbSessionFactory
+    ) -> None:
+        """Nested past the recursion limit: that span's own problem, not the store's."""
+        unparseable = "[" * 100_000 + '"inline_data"' + "]" * 100_000
+        await ingest(db, span("a", unparseable), span("b", call_llm_request()))
+        assert await stored_input(db, "a") == unparseable
+        assert PDF_URL in await stored_input(db, "b")
+
+    @pytest.mark.usefixtures("offload")
+    async def test_a_lone_surrogate_stays_escaped(self, db: DbSessionFactory) -> None:
+        """Written out raw it is not UTF-8, and the span could not be stored at all."""
+        request = json.loads(call_llm_request())
+        request["contents"][0]["parts"].insert(0, {"text": "cut off \ud83d"})
+        await ingest(db, span("a", json.dumps(request)))
+        value = await stored_input(db, "a")
+        assert PDF_URL in value
+        assert "cut off \\ud83d" in value
+
+    @pytest.mark.usefixtures("offload")
+    async def test_one_file_the_store_refuses_does_not_hold_back_the_others(
+        self, db: DbSessionFactory, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        async def refuses_png(content: bytes) -> Optional[StoredMedia]:
+            if content.startswith(b"\x89PNG"):
+                raise RuntimeError("bucket unavailable")
+            return await put_media(content)
+
+        monkeypatch.setattr(span_media, "put_media", refuses_png)
+        png = base64.b64encode(PNG).decode()
+        request = json.loads(call_llm_request())
+        request["contents"][0]["parts"].append(
+            {"inline_data": {"data": png, "mime_type": "image/png"}}
+        )
+        await ingest(db, span("a", json.dumps(request)))
+        parts = json.loads(await stored_input(db, "a"))["contents"][0]["parts"]
+        assert parts[1]["inline_data"][MEDIA_URL_KEY] == PDF_URL
+        assert parts[2]["inline_data"]["data"] == png
+        row = await media_row(db, PDF_SHA)
+        assert row is not None and row.referenced_at is not None
 
     @pytest.mark.usefixtures("offload")
     async def test_bytes_phoenix_does_not_store_stay_inline(self, db: DbSessionFactory) -> None:

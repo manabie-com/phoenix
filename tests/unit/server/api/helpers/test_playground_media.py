@@ -1232,3 +1232,42 @@ class TestPdfSpanAttributes:
         texts = [value for key, value in attributes.items() if key.endswith("message_content.text")]
         assert len(texts) == 1
         assert _PDF_URL in texts[0]
+
+
+def _media_message(url: str, kind: Any) -> PlaygroundMessage:
+    return PlaygroundMessage(
+        role=ChatCompletionMessageRole.USER,
+        content=[MediaContentBlock(type="media", kind=kind, url=url)],
+    )
+
+
+class TestTheStoredTypeDecidesThePart:
+    """
+    A replayed reference carries no type, so the part it arrives in is the client's guess.
+
+    A span's OpenAI `file_data` or a stored reference with no declared type is exactly
+    that case: guessed wrong, a PDF goes to the provider as an image part and is refused.
+    """
+
+    async def test_a_pdf_in_an_image_part_is_sent_as_a_file(
+        self, db: DbSessionFactory, stored_pdf: None
+    ) -> None:
+        async with db() as session:
+            resolved = await resolve_message_media(session, [_media_message(_PDF_URL, "image")])
+        block = message_media(resolved[0])[0]
+        assert block["kind"] == "file"
+        assert block["media_type"] == "application/pdf"
+
+    async def test_an_image_in_a_file_part_is_sent_as_an_image(
+        self, db: DbSessionFactory, stored_png: None
+    ) -> None:
+        async with db() as session:
+            resolved = await resolve_message_media(session, [_media_message(_PNG_URL, "file")])
+        assert message_media(resolved[0])[0]["kind"] == "image"
+
+    async def test_a_matching_part_is_left_as_declared(
+        self, db: DbSessionFactory, stored_pdf: None
+    ) -> None:
+        async with db() as session:
+            resolved = await resolve_message_media(session, [_media_message(_PDF_URL, "file")])
+        assert message_media(resolved[0])[0]["kind"] == "file"
