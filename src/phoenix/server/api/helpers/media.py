@@ -228,7 +228,7 @@ async def store_media(
     return stored
 
 
-async def put_media(content: bytes) -> Optional[StoredMedia]:
+async def put_media(content: bytes, *, sha256: Optional[str] = None) -> Optional[StoredMedia]:
     """
     The bytes half of :func:`store_media`: write them to the store, touch no database.
 
@@ -240,6 +240,7 @@ async def put_media(content: bytes) -> Optional[StoredMedia]:
 
     Args:
         content: The media bytes.
+        sha256: Their digest, when the caller has already computed it.
 
     Returns:
         What names the stored media, or ``None`` when the bytes are empty or are not
@@ -251,7 +252,7 @@ async def put_media(content: bytes) -> Optional[StoredMedia]:
     media_type = detect_media_type(content)
     if media_type is None or media_type not in SUPPORTED_MEDIA_TYPES:
         return None
-    sha256 = hashlib.sha256(content).hexdigest()
+    sha256 = sha256 or hashlib.sha256(content).hexdigest()
     await media_store().put(sha256, content, media_type=media_type)
     return StoredMedia(
         sha256=sha256,

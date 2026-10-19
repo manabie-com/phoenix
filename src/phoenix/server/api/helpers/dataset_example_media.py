@@ -181,8 +181,9 @@ def example_media_content_blocks(
 
 
 # Provider SDKs that cannot fetch a URL take the bytes inline, and the span records
-# the request verbatim. Gemini's shape is `{"inline_data": {"mime_type", "data"}}`.
-_INLINE_DATA_KEY = "inline_data"
+# the request verbatim. Gemini's shape is `{"inline_data": {"mime_type", "data"}}`, or
+# `inlineData` / `mimeType` as the JS SDK and the REST API write it.
+_INLINE_DATA_KEYS = ("inline_data", "inlineData")
 _INLINE_PAYLOAD_KEY = "data"
 
 #: Replaces ``data`` once the bytes are stored. A distinct name on purpose: leaving
@@ -232,12 +233,15 @@ def _decode_inline_payload(payload: str) -> Optional[bytes]:
         return None
 
 
-def _is_inline_media_part(value: Any) -> bool:
-    """Whether a mapping is a provider's inline-bytes part."""
+def _inline_data_key(value: Any) -> Optional[str]:
+    """The key holding a provider's inline-bytes part, if the mapping is one."""
     if not isinstance(value, Mapping):
-        return False
-    inline = value.get(_INLINE_DATA_KEY)
-    return isinstance(inline, Mapping) and isinstance(inline.get(_INLINE_PAYLOAD_KEY), str)
+        return None
+    for key in _INLINE_DATA_KEYS:
+        inline = value.get(key)
+        if isinstance(inline, Mapping) and isinstance(inline.get(_INLINE_PAYLOAD_KEY), str):
+            return key
+    return None
 
 
 async def externalize_inline_media(session: AsyncSession, value: Any) -> Any:
@@ -326,14 +330,15 @@ async def _externalize(store: MediaStorer, value: Any, depth: int) -> Any:
         # walked too. Returning early here would leave a `data:` URL sitting
         # beside the payload untouched, and would skip the rest of the mapping
         # entirely whenever the payload could not be decoded.
+        inline_key = _inline_data_key(value)
         replacement = (
-            await _externalized_inline_payload(store, value[_INLINE_DATA_KEY])
-            if _is_inline_media_part(value)
+            await _externalized_inline_payload(store, value[inline_key])
+            if inline_key is not None
             else None
         )
         return {
             key: replacement
-            if key == _INLINE_DATA_KEY and replacement is not None
+            if key == inline_key and replacement is not None
             else await _externalize(store, item, depth + 1)
             for key, item in value.items()
         }

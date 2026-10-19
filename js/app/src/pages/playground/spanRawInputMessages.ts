@@ -84,10 +84,11 @@ const pick = (record: Record<string, unknown>, ...keys: string[]): unknown => {
  * A stored `phoenix://media/<sha256>` reference passes through and, when the payload
  * declared no type beside it, takes the same placeholder replay gives one — the type
  * held against the stored bytes is authoritative and is filled in when the run
- * resolves the reference. The cost is that a stored *document* recorded without a
- * declared type is replayed as an image; nothing on the client can tell them apart
- * without fetching the bytes. The exception is a field that only holds documents,
- * whose reader declares one.
+ * resolves the reference, and the run sends the part that type says. What the guess
+ * still decides is the editor: a stored *document* recorded without a declared type is
+ * shown as an image, since nothing on the client can tell them apart without fetching
+ * the bytes. The exception is a field that only holds documents, whose reader declares
+ * one.
  *
  * Inline media goes through `inlineMedia`, which returns the URL and its type as one
  * canonical pair; nothing here recombines them, because a pair assembled from two
@@ -145,7 +146,8 @@ const mediaTypeFromFormat = (
  * every PDF from a responses request, including the ones Phoenix itself recorded.
  *
  * A `data:` URL names its own type. The stored reference the server writes in its
- * place (`span_media.py`) does not, and `file_data` only ever holds a document.
+ * place (`span_media.py`) does not, and `file_data` only ever holds a document, so the
+ * editor shows it as one. The run itself goes by the stored type either way.
  */
 const readOpenAIFileData = (
   part: Record<string, unknown>

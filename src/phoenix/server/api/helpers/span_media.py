@@ -8,15 +8,16 @@ span beneath it. On the staging deployment that grew the ``spans`` table to 44 G
 of it TOAST, and one attribute filter over a week of a 689-span project took 21 seconds:
 Postgres decompresses a span's entire ``attributes`` value to read any key of it.
 
-So as a span is queued for insertion, inline media in its ``input.value`` and
-``output.value`` goes to the media store (GCS in a deployment) and is replaced by a
-``phoenix://media/<sha256>`` reference — the same rewrite, through the same walker, as
-copying a span into a dataset (see ``dataset_example_media``). The span view and
-playground replay draw the reference wherever they would have drawn the bytes.
+So once a span is received, and before it is queued for insertion, inline media in its
+``input.value`` and ``output.value`` goes to the media store (GCS in a deployment) and is
+replaced by a ``phoenix://media/<sha256>`` reference — the same rewrite, through the
+same walker, as copying a span into a dataset (see ``dataset_example_media``). The span
+view and playground replay draw the reference wherever they would have drawn the bytes.
 
 Wired in by :class:`MediaOffloadingBulkInserter`, which ``create_app`` builds in place
 of upstream's ``BulkInserter``: upstream's insert loop, which upstream keeps reworking,
-is not edited at all.
+is not edited at all. Spans handed to the inserter's constructor as
+``initial_batch_of_spans`` bypass the queue, and so keep their media inline.
 
 Off unless ``PHOENIX_SPAN_MEDIA_OFFLOAD=true``. Without a bucket the store is the local
 filesystem, which in a container does not outlive the pod, so turning this on is a
@@ -81,18 +82,18 @@ Shorter values are not parsed at all. Nothing that small is worth a store round 
 and it keeps the cost of this module at one length check for almost every span.
 """
 
-_MARKERS = ('"inline_data"', "data:image/", "data:application/pdf")
+_MARKERS = ('"inline_data"', '"inlineData"', "data:image/", "data:application/pdf")
 """
 A value is parsed only if it holds one of the shapes the walker replaces: a Gemini
-inline part, or a ``data:`` URL of a type Phoenix stores. A bare ``"data:"`` would match
-every ``metadata:`` in a large log or prompt and parse it for nothing.
+inline part (snake_case from the Python SDK, camelCase from the JS SDK and REST API), or
+a ``data:`` URL of a type Phoenix stores. A bare ``"data:"`` would match every
+``metadata:`` in a large log or prompt and parse it for nothing.
 """
 
 _STORE_TIMEOUT_SECONDS = 10.0
 """
-How long one file may wait on the store. Ingestion inserts spans one after another, so a
-store that hangs would otherwise stall every span queued behind this one. Per file rather
-than per span, so a span carrying many images is not timed out for their total.
+How long one file may wait on the store. Per file rather than per span, so a span
+carrying many images is not timed out for their total.
 """
 
 _PAUSE_SECONDS = 60.0
@@ -103,6 +104,17 @@ value cannot be rewritten says nothing about the next one.
 """
 
 _paused_until = 0.0
+
+_MAX_SPANS_UPLOADING = 8
+"""
+How many spans may be uploading at once before queueing another waits for a slot.
+
+Each holds its whole decoded request in memory until it is queued, which is what bounds
+the extra memory to a few large requests rather than a whole burst of them.
+"""
+
+_HASH_IN_THREAD_BYTES = 1 << 20
+"""Files at least this large are hashed in a thread: ``hashlib`` releases the GIL."""
 
 _RECENT_CAPACITY = 1024
 """
@@ -123,32 +135,69 @@ def get_env_span_media_offload() -> bool:
 
 class MediaOffloadingBulkInserter(BulkInserter):
     """
-    The bulk inserter, with each span's inline media moved to the media store as it is
-    queued.
+    The bulk inserter, with each span's inline media moved to the media store before
+    the span is queued.
 
-    Queued rather than inserted: the insert loop holds one transaction across a whole
-    batch and inserts its spans one after another, so uploading there would hold the
-    connection — and on SQLite the write lock — through every upload in the batch, in
-    turn. A span being queued has no transaction yet, and the receivers queue from their
-    own tasks, so uploads for different requests also run concurrently. OTLP over HTTP
-    queues after it has responded; a gRPC export waits for its uploads.
+    Not inside the insert loop: it holds one transaction across a whole batch and
+    inserts its spans one after another, so uploading there would hold the connection —
+    and on SQLite the write lock — through every upload in the batch, in turn.
 
-    ``create_app`` builds this by default, so upstream's insert loop is untouched.
+    Not in the receiver's path either: gRPC and ``POST /v1/spans`` wait for the queue
+    before they answer their client, so a span carrying media is handed to a task of its
+    own and the receiver answers at once. A span without media is queued directly.
+
+    Overrides upstream's private ``_enqueue_span``, the callable ``__aenter__`` hands
+    every receiver. ``TestWiring`` fails if a rename upstream leaves this unused.
     """
 
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
+        super().__init__(*args, **kwargs)
+        self._uploading: "set[asyncio.Task[None]]" = set()
+        self._upload_slots = asyncio.Semaphore(_MAX_SPANS_UPLOADING)
+
     async def _enqueue_span(self, span: Span, project_name: str) -> None:
-        await super()._enqueue_span(await offload_span_media(self._db, span), project_name)
+        if not _candidates(span):
+            await super()._enqueue_span(span, project_name)
+            return
+        await self._upload_slots.acquire()
+        task = asyncio.create_task(self._offload_then_enqueue(span, project_name))
+        self._uploading.add(task)
+        task.add_done_callback(self._uploading.discard)
+
+    async def _offload_then_enqueue(self, span: Span, project_name: str) -> None:
+        queued = span
+        try:
+            queued = await offload_span_media(self._db, span)
+        finally:
+            # Queued even when cancelled at shutdown, with its media inline: a span is
+            # never dropped for want of an upload.
+            self._upload_slots.release()
+            await super()._enqueue_span(queued, project_name)
+
+    async def __aexit__(self, *args: Any) -> None:
+        await self._finish_uploads(self._shutdown_drain_sec)
+        await super().__aexit__(*args)
+
+    async def _finish_uploads(self, timeout: float) -> None:
+        """Wait for spans still uploading, then queue the stragglers with media inline."""
+        if not self._uploading:
+            return
+        _, pending = await asyncio.wait(set(self._uploading), timeout=timeout)
+        for task in pending:
+            task.cancel()
+        await asyncio.gather(*pending, return_exceptions=True)
 
 
 async def offload_span_media(db: DbSessionFactory, span: Span) -> Span:
     """
     The span with its inline media moved to the media store, or the span unchanged.
 
-    The bytes are stored first, then their ``media_files`` rows are written and stamped
-    as used in one short transaction of their own. If that fails the span keeps its
-    media inline: nothing references the stored bytes, and the span is not lost. If the
-    span itself later fails to insert, the rows stay, marked used: a few kept files, never
-    a missing one.
+    The bytes are stored first, then the ``media_files`` rows of files stored just now
+    are written and stamped as used in one short transaction of their own; a file this
+    process already recorded needs neither. If that transaction fails, the span keeps
+    its media inline: nothing references the stored bytes, and the span is not lost. If
+    the span itself later fails to insert, the rows stay, marked used: a few kept files,
+    never a missing one.
 
     Args:
         db: Session factory for the ``media_files`` rows.
@@ -157,24 +206,25 @@ async def offload_span_media(db: DbSessionFactory, span: Span) -> Span:
     Returns:
         The span to queue.
     """
-    offloaded, stored = await _offloaded(span)
+    offloaded, stored, uploaded = await _offloaded(span)
     if not stored:
         return span
-    # One row per file, in a fixed order, so concurrent spans carrying the same files
-    # take their row locks in the same order and cannot deadlock.
-    unique = sorted({media.sha256: media for media in stored}.values(), key=_by_sha256)
-    try:
-        async with db() as session:
-            for media in unique:
-                await record_media(session, media)
-            await mark_media_referenced(session, [media.url for media in unique])
-    except Exception:
-        logger.exception(
-            f"Failed to record stored media for span {span.context.span_id}; keeping it inline"
-        )
-        return span
-    for media in unique:
-        _remember(media)
+    if uploaded:
+        # One row per file, in a fixed order, so concurrent spans carrying the same files
+        # take their row locks in the same order and cannot deadlock.
+        unique = sorted({media.sha256: media for media in uploaded}.values(), key=_by_sha256)
+        try:
+            async with db() as session:
+                for media in unique:
+                    await record_media(session, media)
+                await mark_media_referenced(session, [media.url for media in unique])
+        except Exception:
+            logger.exception(
+                f"Failed to record stored media for span {span.context.span_id}; keeping it inline"
+            )
+            return span
+        for media in unique:
+            _remember(media)
     return offloaded
 
 
@@ -189,40 +239,59 @@ def _remember(media: StoredMedia) -> None:
         _recent.popitem(last=False)
 
 
-def _recalled(content: bytes) -> Optional[StoredMedia]:
-    media = _recent.get(hashlib.sha256(content).hexdigest())
+def _recall(sha256: str) -> Optional[StoredMedia]:
+    media = _recent.get(sha256)
     if media is not None:
-        _recent.move_to_end(media.sha256)
+        _recent.move_to_end(sha256)
     return media
 
 
-async def _offloaded(span: Span) -> tuple[Span, list[StoredMedia]]:
-    """The span with its inline media replaced, and the media that replaced it."""
+async def _sha256(content: bytes) -> str:
+    if len(content) < _HASH_IN_THREAD_BYTES:
+        return hashlib.sha256(content).hexdigest()
+    return await asyncio.to_thread(lambda: hashlib.sha256(content).hexdigest())
+
+
+def _candidates(span: Span) -> dict[str, str]:
+    """The span's values worth rewriting, or none when offloading is off or paused."""
     if not get_env_span_media_offload() or _store_paused():
-        return span, []
+        return {}
     candidates: dict[str, str] = {}
     for key in _ATTRIBUTES:
         value = get_attribute_value(span.attributes, key)
         if _worth_parsing(value):
             candidates[key] = value
+    return candidates
+
+
+async def _offloaded(span: Span) -> tuple[Span, list[StoredMedia], list[StoredMedia]]:
+    """
+    The span with its inline media replaced, the media that replaced it, and which of
+    that was uploaded just now rather than recalled.
+    """
+    candidates = _candidates(span)
     if not candidates:
-        return span, []
+        return span, [], []
 
     span_id = span.context.span_id
     stored: list[StoredMedia] = []
+    uploaded: list[StoredMedia] = []
 
     async def store(content: bytes) -> Optional[StoredMedia]:
         # When the store fails, that file stays inline and so does every file after it
         # until the pause ends, in this span and the next: it is the store that failed.
         # Files this span already stored stay stored.
         global _paused_until
-        if (media := _recalled(content)) is not None:
+        sha256 = await _sha256(content)
+        if (media := _recall(sha256)) is not None:
             stored.append(media)
             return media
         if _store_paused():
             return None
         try:
-            media = await asyncio.wait_for(put_media(content), _STORE_TIMEOUT_SECONDS)
+            media = await asyncio.wait_for(
+                put_media(content, sha256=sha256), _STORE_TIMEOUT_SECONDS
+            )
         except Exception:
             _paused_until = monotonic() + _PAUSE_SECONDS
             logger.exception(
@@ -232,26 +301,32 @@ async def _offloaded(span: Span) -> tuple[Span, list[StoredMedia]]:
             return None
         if media is not None:
             stored.append(media)
+            uploaded.append(media)
         return media
 
     attributes = span.attributes
     for key, value in candidates.items():
-        before = len(stored)
+        stored_before, uploaded_before = len(stored), len(uploaded)
         try:
             replaced = await _replace_in_value(store, value)
         except Exception:
             # The value itself, not the store, e.g. JSON nested past the recursion limit.
-            # It stays as it arrived; anything already stored for it is left unrecorded.
-            logger.warning(f"Could not rewrite {key} of span {span_id}; keeping it inline")
-            del stored[before:]
+            # It stays as it arrived. Bytes already uploaded for it are left without a
+            # row, where the sweeper, which walks rows, will not see them: some wasted
+            # space, never lost media.
+            logger.warning(
+                f"Could not rewrite {key} of span {span_id}; keeping it inline", exc_info=True
+            )
+            del stored[stored_before:]
+            del uploaded[uploaded_before:]
             continue
         # Rewritten only if something was stored, so a value with nothing to replace
         # keeps its exact original text rather than a re-serialisation of it.
-        if len(stored) > before:
+        if len(stored) > stored_before:
             attributes = _with_attribute(attributes, key, replaced)
     if not stored:
-        return span, []
-    return replace(span, attributes=attributes), stored
+        return span, [], []
+    return replace(span, attributes=attributes), stored, uploaded
 
 
 def _store_paused() -> bool:
@@ -289,8 +364,8 @@ def _with_attribute(attributes: Mapping[str, Any], key: str, value: Any) -> dict
     """
     ``attributes`` with the nested attribute ``key`` set, copying only along its path.
 
-    The span's attribute dict is shared with whatever else holds the span, and the
-    bulk inserter goes on to price the span from the original, so it is not mutated.
+    The attribute dict belongs to the span as the receiver decoded it, so it is copied
+    rather than mutated. Pricing reads only token counts, which this never touches.
     """
     head, _, rest = key.partition(".")
     updated = dict(attributes)

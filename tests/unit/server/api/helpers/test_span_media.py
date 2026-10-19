@@ -31,6 +31,7 @@ from phoenix.server import app
 from phoenix.server.api.helpers import span_media
 from phoenix.server.api.helpers.dataset_example_media import MEDIA_URL_KEY
 from phoenix.server.api.helpers.media import StoredMedia, put_media
+from phoenix.server.api.helpers.media import record_media as upstream_record_media
 from phoenix.server.api.helpers.media_storage import media_store
 from phoenix.server.api.helpers.span_media import MediaOffloadingBulkInserter
 from phoenix.server.types import DbSessionFactory
@@ -95,28 +96,37 @@ async def _idle() -> None:
     """Stands in for the inserter's background loop, so each test inserts when it says."""
 
 
-async def _refusing_png(content: bytes) -> Optional[StoredMedia]:
+async def _refusing_png(content: bytes, **kwargs: Any) -> Optional[StoredMedia]:
     """A store that fails on PNGs and stores anything else."""
     if content.startswith(b"\x89PNG"):
         raise RuntimeError("bucket unavailable")
-    return await put_media(content)
+    return await put_media(content, **kwargs)
+
+
+def inserter_for(db: DbSessionFactory, **kwargs: Any) -> MediaOffloadingBulkInserter:
+    inserter = MediaOffloadingBulkInserter(
+        db,
+        event_queue=_Events(),
+        span_cost_calculator=None,  # no span here is priced
+        **kwargs,
+    )
+    inserter._bulk_insert = _idle  # type: ignore[method-assign]
+    return inserter
 
 
 async def ingest(db: DbSessionFactory, *spans: Span) -> None:
     """
     Insert spans the way the server does: queue each through the callable the inserter
     hands the receivers, then run the inserter's own loop over them.
+
+    Each span's uploads finish before the next is queued, so tests see one order.
     """
-    inserter = MediaOffloadingBulkInserter(
-        db,
-        event_queue=_Events(),
-        span_cost_calculator=None,  # type: ignore[arg-type]  # no span here is priced
-    )
-    inserter._bulk_insert = _idle  # type: ignore[method-assign]
+    inserter = inserter_for(db)
     _, enqueue_span, _ = await inserter.__aenter__()
     try:
         for s in spans:
             await enqueue_span(s, "project")
+            await inserter._finish_uploads(timeout=30)
         await inserter._insert_spans(len(spans))
     finally:
         await inserter.__aexit__()
@@ -247,10 +257,10 @@ class TestThePaperLeavesTheSpan:
         """An agent re-sends the same pages on every model call."""
         uploads = 0
 
-        async def counting(content: bytes) -> Optional[StoredMedia]:
+        async def counting(content: bytes, **kwargs: Any) -> Optional[StoredMedia]:
             nonlocal uploads
             uploads += 1
-            return await put_media(content)
+            return await put_media(content, **kwargs)
 
         monkeypatch.setattr(span_media, "put_media", counting)
         spans = [span(span_id, call_llm_request()) for span_id in ("a", "b", "c")]
@@ -365,7 +375,7 @@ class TestNothingIsLost:
     ) -> None:
         calls = 0
 
-        async def failing(content: bytes) -> None:
+        async def failing(content: bytes, **kwargs: Any) -> None:
             nonlocal calls
             calls += 1
             raise RuntimeError("bucket unavailable")
@@ -382,7 +392,7 @@ class TestNothingIsLost:
     async def test_a_slow_store_times_out_and_keeps_the_media_inline(
         self, db: DbSessionFactory, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        async def slow(content: bytes) -> None:
+        async def slow(content: bytes, **kwargs: Any) -> None:
             await asyncio.sleep(5)
 
         monkeypatch.setattr(span_media, "put_media", slow)
@@ -416,9 +426,9 @@ class TestUploadsHappenOutsideTheInsertTransaction:
         """
         events: list[str] = []
 
-        async def recording_put(content: bytes) -> Optional[StoredMedia]:
+        async def recording_put(content: bytes, **kwargs: Any) -> Optional[StoredMedia]:
             events.append("upload")
-            return await put_media(content)
+            return await put_media(content, **kwargs)
 
         async def recording_insert(*args: Any, **kwargs: Any) -> Any:
             events.append("insert")
@@ -440,7 +450,7 @@ class TestWiring:
         inserter = MediaOffloadingBulkInserter(
             db,
             event_queue=_Events(),
-            span_cost_calculator=None,  # type: ignore[arg-type]
+            span_cost_calculator=None,
         )
         inserter._bulk_insert = _idle  # type: ignore[method-assign]
         _, enqueue_span, _ = await inserter.__aenter__()
@@ -455,3 +465,93 @@ class TestWiring:
         """`create_app` builds it unless a caller, such as the test suite, passes its own."""
         source = inspect.getsource(app.create_app)
         assert "bulk_inserter_factory or MediaOffloadingBulkInserter" in source
+
+
+@pytest.mark.usefixtures("offload")
+class TestTheReceiverDoesNotWaitForUploads:
+    """gRPC and `POST /v1/spans` answer their client only once the span is queued."""
+
+    async def test_queueing_returns_while_the_upload_is_still_running(
+        self, db: DbSessionFactory, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        release = asyncio.Event()
+
+        async def held(content: bytes, **kwargs: Any) -> Optional[StoredMedia]:
+            await release.wait()
+            return await put_media(content, **kwargs)
+
+        monkeypatch.setattr(span_media, "put_media", held)
+        inserter = inserter_for(db)
+        _, enqueue_span, _ = await inserter.__aenter__()
+        try:
+            await asyncio.wait_for(enqueue_span(span("a", call_llm_request()), "project"), 1)
+            assert not inserter._spans  # still uploading, so not queued yet
+            release.set()
+            await inserter._finish_uploads(timeout=30)
+            await inserter._insert_spans(1)
+        finally:
+            await inserter.__aexit__()
+        assert PDF_URL in await stored_input(db, "a")
+
+    async def test_a_span_still_uploading_at_shutdown_is_queued_inline(
+        self, db: DbSessionFactory, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        async def hangs(content: bytes, **kwargs: Any) -> Optional[StoredMedia]:
+            await asyncio.sleep(30)
+            return None
+
+        monkeypatch.setattr(span_media, "put_media", hangs)
+        inserter = inserter_for(db, shutdown_drain_sec=0.1)
+        _, enqueue_span, _ = await inserter.__aenter__()
+        request = call_llm_request()
+        await enqueue_span(span("a", request), "project")
+        await inserter.__aexit__()
+        assert [s.attributes["input"]["value"] for s, _ in inserter._spans] == [request]
+
+    async def test_a_span_without_media_is_queued_directly(self, db: DbSessionFactory) -> None:
+        inserter = inserter_for(db)
+        _, enqueue_span, _ = await inserter.__aenter__()
+        try:
+            await enqueue_span(span("a", "plain text"), "project")
+            assert len(inserter._spans) == 1
+            assert not inserter._uploading
+        finally:
+            await inserter.__aexit__()
+
+
+@pytest.mark.usefixtures("offload")
+class TestRepeatedFiles:
+    async def test_a_file_already_recorded_needs_no_database_write(
+        self, db: DbSessionFactory, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        recorded = 0
+
+        async def counting(session: Any, media: StoredMedia, **kwargs: Any) -> None:
+            nonlocal recorded
+            recorded += 1
+            await upstream_record_media(session, media, **kwargs)
+
+        monkeypatch.setattr(span_media, "record_media", counting)
+        await ingest(db, *(span(span_id, call_llm_request()) for span_id in ("a", "b", "c")))
+        assert recorded == 1
+        row = await media_row(db, PDF_SHA)
+        assert row is not None and row.referenced_at is not None
+
+
+@pytest.mark.usefixtures("offload")
+class TestCamelCase:
+    async def test_the_js_sdk_shape_moves_too(self, db: DbSessionFactory) -> None:
+        """`inlineData` / `mimeType`, as the JS SDK and the REST API write a Gemini part."""
+        request = json.dumps(
+            {
+                "contents": [
+                    {
+                        "role": "user",
+                        "parts": [{"inlineData": {"mimeType": "application/pdf", "data": PDF_B64}}],
+                    }
+                ]
+            }
+        )
+        await ingest(db, span("a", request))
+        part = json.loads(await stored_input(db, "a"))["contents"][0]["parts"][0]
+        assert part == {"inlineData": {"mimeType": "application/pdf", MEDIA_URL_KEY: PDF_URL}}
