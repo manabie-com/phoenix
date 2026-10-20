@@ -18,6 +18,7 @@ import type { HTMLAttributes, ReactNode } from "react";
 import { createContext, useCallback, useContext, useState } from "react";
 import { UNSAFE_PortalProvider } from "react-aria/PortalProvider";
 
+import { useHostRegistration } from "./hostRegistration";
 import { LOCAL_OVERLAY_Z_INDEX, LOCAL_RAISED_Z_INDEX } from "./stacking";
 
 type OverlayFrameContextValue = {
@@ -78,8 +79,9 @@ const OverlayFrameContext = createContext<OverlayFrameContextValue | null>(
 export function OverlayFrameProvider({ children }: { children: ReactNode }) {
   const [applicationViewportElement, setApplicationViewportElement] =
     useState<HTMLDivElement | null>(null);
-  const [drawerHostElement, setDrawerHostElement] =
+  const [drawerHostElement, setDrawerHostElementNow] =
     useState<HTMLDivElement | null>(null);
+  const setDrawerHostElement = useHostRegistration(setDrawerHostElementNow);
   const [sideNavigationElement, setSideNavigationElement] =
     useState<HTMLDivElement | null>(null);
   const [viewportModalHostElement, setViewportModalHostElement] =
