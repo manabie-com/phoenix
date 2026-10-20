@@ -47,6 +47,7 @@ import {
 
 import {
   joinTextParts,
+  REPLAYED_STORED_FILE_MEDIA_TYPE,
   REPLAYED_STORED_IMAGE_MEDIA_TYPE,
 } from "./playgroundMedia";
 import { chatMessageRolesSchema } from "./schemas";
@@ -83,9 +84,11 @@ const pick = (record: Record<string, unknown>, ...keys: string[]): unknown => {
  * A stored `phoenix://media/<sha256>` reference passes through and, when the payload
  * declared no type beside it, takes the same placeholder replay gives one — the type
  * held against the stored bytes is authoritative and is filled in when the run
- * resolves the reference. The cost is that a stored *document* recorded without a
- * declared type is replayed as an image; nothing on the client can tell them apart
- * without fetching the bytes.
+ * resolves the reference, and the run sends the part that type says. What the guess
+ * still decides is the editor: a stored *document* recorded without a declared type is
+ * shown as an image, since nothing on the client can tell them apart without fetching
+ * the bytes. The exception is a field that only holds documents, whose reader declares
+ * one.
  *
  * Inline media goes through `inlineMedia`, which returns the URL and its type as one
  * canonical pair; nothing here recombines them, because a pair assembled from two
@@ -136,6 +139,32 @@ const mediaTypeFromFormat = (
 };
 
 /**
+ * An OpenAI document, in both of the shapes the SDKs use: the completions API nests it
+ * as `file: {file_data, filename}`, while the responses API puts it on the part —
+ * `{type: "input_file", filename, file_data}`, which is what this fork's own responses
+ * builder emits (`playground_media/_openai.py`). Reading only the nested one dropped
+ * every PDF from a responses request, including the ones Phoenix itself recorded.
+ *
+ * A `data:` URL names its own type. The stored reference the server writes in its
+ * place (`span_media.py`) does not, and `file_data` only ever holds a document, so the
+ * editor shows it as one. The run itself goes by the stored type either way.
+ */
+const readOpenAIFileData = (
+  part: Record<string, unknown>
+): FoundMedia | null => {
+  const fileData =
+    asString(pick(part, "file_data", "fileData")) ??
+    asString(pick(asRecord(pick(part, "file")) ?? {}, "file_data", "fileData"));
+  if (fileData == null) {
+    return null;
+  }
+  return mediaPart(
+    isHostedMediaUrl(fileData) ? REPLAYED_STORED_FILE_MEDIA_TYPE : null,
+    fileData
+  );
+};
+
+/**
  * The media on one request part, whichever provider wrote it.
  *
  * Ordered from the most specific shape to the most general so that a part matching
@@ -143,10 +172,12 @@ const mediaTypeFromFormat = (
  */
 const readPartMedia = (part: Record<string, unknown>): FoundMedia | null => {
   // Google: `inline_data: {mime_type, data}`. The media type is declared, and the
-  // payload is base64 or the repr of the SDK's `bytes`.
+  // payload is base64 or the repr of the SDK's `bytes` — or, once the server has moved
+  // the bytes to the media store (`span_media.py`), a `phoenix_media_url` reference
+  // standing in for `data`.
   const inlineData = asRecord(pick(part, "inline_data", "inlineData"));
   if (inlineData) {
-    const payload = asString(pick(inlineData, "data"));
+    const payload = asString(pick(inlineData, "data", "phoenix_media_url"));
     if (payload) {
       return mediaPart(
         asString(pick(inlineData, "mime_type", "mimeType")),
@@ -180,16 +211,9 @@ const readPartMedia = (part: Record<string, unknown>): FoundMedia | null => {
     return mediaPart(null, imageUrlValue);
   }
 
-  // OpenAI documents, in both of the shapes the SDKs use: the completions API nests it
-  // as `file: {file_data, filename}`, while the responses API puts it on the part —
-  // `{type: "input_file", filename, file_data}`, which is what this fork's own responses
-  // builder emits (`playground_media/_openai.py`). Reading only the nested one dropped
-  // every PDF from a responses request, including the ones Phoenix itself recorded.
-  const fileData =
-    asString(pick(part, "file_data", "fileData")) ??
-    asString(pick(asRecord(pick(part, "file")) ?? {}, "file_data", "fileData"));
+  const fileData = readOpenAIFileData(part);
   if (fileData) {
-    return mediaPart(null, fileData);
+    return fileData;
   }
 
   // Bedrock: `image: {format, source: {bytes}}` and `document: {format, source}`.

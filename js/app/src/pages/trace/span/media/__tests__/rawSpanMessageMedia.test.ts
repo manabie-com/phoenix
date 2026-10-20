@@ -115,6 +115,24 @@ describe("withRawSpanMessageMedia", () => {
     expect(mediaUrls(result, 1)).toEqual([`data:image/png;base64,${PNG_B64}`]);
   });
 
+  it("shows a document the server moved to the media store", () => {
+    const stored = `phoenix://media/${"a".repeat(64)}`;
+    const result = withRawSpanMessageMedia(
+      llmAttributes(RECORDED_MESSAGES),
+      rawAttributes([
+        { text: QUESTION },
+        { text: ANSWER },
+        {
+          inline_data: {
+            mime_type: "application/pdf",
+            phoenix_media_url: stored,
+          },
+        },
+      ])
+    );
+    expect(mediaUrls(result, 1)).toEqual([stored]);
+  });
+
   it("reads the URL-safe alphabet the Google SDK writes", () => {
     const result = withRawSpanMessageMedia(
       llmAttributes(RECORDED_MESSAGES),

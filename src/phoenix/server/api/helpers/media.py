@@ -222,19 +222,66 @@ async def store_media(
         into a dataset, where one unrecognisable blob must not fail the whole
         operation. The REST upload endpoint turns the same ``None`` into a 415.
     """
+    stored = await put_media(content)
+    if stored is not None:
+        await record_media(session, stored, file_name=file_name)
+    return stored
+
+
+async def put_media(content: bytes, *, sha256: Optional[str] = None) -> Optional[StoredMedia]:
+    """
+    The bytes half of :func:`store_media`: write them to the store, touch no database.
+
+    Split out for span ingestion, which has to bound how long it waits on the store
+    and so may abandon this call part-way. Abandoning a store write is harmless — the
+    write is content-addressed and idempotent — whereas abandoning a database
+    statement mid-flight can leave the session that every other span in the batch is
+    using unusable. Keeping the two apart is what makes the timeout safe.
+
+    Args:
+        content: The media bytes.
+        sha256: Their digest, when the caller has already computed it.
+
+    Returns:
+        What names the stored media, or ``None`` when the bytes are empty or are not
+        a media type Phoenix stores. Until :func:`record_media` runs, nothing in the
+        database knows the bytes are there.
+    """
     if not content:
         return None
     media_type = detect_media_type(content)
     if media_type is None or media_type not in SUPPORTED_MEDIA_TYPES:
         return None
-    sha256 = hashlib.sha256(content).hexdigest()
+    sha256 = sha256 or hashlib.sha256(content).hexdigest()
     await media_store().put(sha256, content, media_type=media_type)
+    return StoredMedia(
+        sha256=sha256,
+        media_type=media_type,
+        size_bytes=len(content),
+        url=hosted_media_url(sha256),
+    )
+
+
+async def record_media(
+    session: AsyncSession,
+    stored: StoredMedia,
+    *,
+    file_name: Optional[str] = None,
+) -> None:
+    """
+    The metadata half of :func:`store_media`: the ``media_files`` row for stored bytes.
+
+    Args:
+        session: Session used to record the row. The caller's transaction commits it.
+        stored: What :func:`put_media` returned.
+        file_name: The name to remember the media by, when one is known.
+    """
     await session.execute(
         insert_on_conflict(
             dict(
-                sha256=sha256,
-                media_type=media_type,
-                size_bytes=len(content),
+                sha256=stored.sha256,
+                media_type=stored.media_type,
+                size_bytes=stored.size_bytes,
                 file_name=file_name,
             ),
             dialect=SupportedSQLDialect(session.get_bind().dialect.name),
@@ -243,10 +290,4 @@ async def store_media(
             on_conflict=OnConflict.DO_NOTHING,
             constraint_name="pk_media_files",
         )
-    )
-    return StoredMedia(
-        sha256=sha256,
-        media_type=media_type,
-        size_bytes=len(content),
-        url=hosted_media_url(sha256),
     )

@@ -32,7 +32,7 @@ reached. Only images round-trip.
 
 import ast
 import binascii
-from typing import Any, Mapping, Optional, Sequence
+from typing import Any, Awaitable, Callable, Mapping, Optional, Sequence
 
 from openinference.semconv.trace import (
     ImageAttributes,
@@ -42,7 +42,7 @@ from openinference.semconv.trace import (
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from phoenix.db.types.media import InlineMedia, decode_base64, parse_media_url
-from phoenix.server.api.helpers.media import store_media
+from phoenix.server.api.helpers.media import StoredMedia, store_media
 from phoenix.server.api.helpers.message_media import (
     ContentBlock,
     MediaContentBlock,
@@ -181,8 +181,9 @@ def example_media_content_blocks(
 
 
 # Provider SDKs that cannot fetch a URL take the bytes inline, and the span records
-# the request verbatim. Gemini's shape is `{"inline_data": {"mime_type", "data"}}`.
-_INLINE_DATA_KEY = "inline_data"
+# the request verbatim. Gemini's shape is `{"inline_data": {"mime_type", "data"}}`, or
+# `inlineData` / `mimeType` as the JS SDK and the REST API write it.
+_INLINE_DATA_KEYS = ("inline_data", "inlineData")
 _INLINE_PAYLOAD_KEY = "data"
 
 #: Replaces ``data`` once the bytes are stored. A distinct name on purpose: leaving
@@ -232,12 +233,16 @@ def _decode_inline_payload(payload: str) -> Optional[bytes]:
         return None
 
 
-def _is_inline_media_part(value: Any) -> bool:
-    """Whether a mapping is a provider's inline-bytes part."""
+def _inline_data_keys(value: Any) -> list[str]:
+    """The keys holding a provider's inline-bytes part, if the mapping is one."""
     if not isinstance(value, Mapping):
-        return False
-    inline = value.get(_INLINE_DATA_KEY)
-    return isinstance(inline, Mapping) and isinstance(inline.get(_INLINE_PAYLOAD_KEY), str)
+        return []
+    return [
+        key
+        for key in _INLINE_DATA_KEYS
+        if isinstance(inline := value.get(key), Mapping)
+        and isinstance(inline.get(_INLINE_PAYLOAD_KEY), str)
+    ]
 
 
 async def externalize_inline_media(session: AsyncSession, value: Any) -> Any:
@@ -275,7 +280,32 @@ async def externalize_inline_media(session: AsyncSession, value: Any) -> Any:
         :data:`_MAX_WALK_DEPTH` — is returned untouched, because failing to shrink
         a row is a far better outcome than failing to save somebody's span.
     """
-    return await _externalize(session, value, 0)
+    return await replace_inline_media(lambda content: store_media(session, content), value)
+
+
+MediaStorer = Callable[[bytes], Awaitable[Optional[StoredMedia]]]
+"""Stores decoded media bytes and returns what names them, or ``None`` to keep them inline."""
+
+
+async def replace_inline_media(store: MediaStorer, value: Any) -> Any:
+    """
+    :func:`externalize_inline_media` with the storing left to the caller.
+
+    The walk — which shapes count as inline media, and what replaces them — is the
+    same for every caller; how the bytes are stored is not. A dataset example records
+    the ``media_files`` row in the same breath as the bytes. Span ingestion stores the
+    bytes first, under a timeout, and records the rows later inside the span's own
+    transaction (see ``span_media``).
+
+    Args:
+        store: Called once per inline payload with its decoded bytes.
+        value: Any JSON-shaped value.
+
+    Returns:
+        The same structure with every payload ``store`` accepted replaced by its
+        reference, exactly as :func:`externalize_inline_media` describes.
+    """
+    return await _externalize(store, value, 0)
 
 
 #: How deep the walk will go. An example's input is arbitrary JSON from somebody
@@ -288,37 +318,36 @@ async def externalize_inline_media(session: AsyncSession, value: Any) -> Any:
 _MAX_WALK_DEPTH = 12
 
 
-async def _externalize(session: AsyncSession, value: Any, depth: int) -> Any:
+async def _externalize(store: MediaStorer, value: Any, depth: int) -> Any:
     """Recursive worker for :func:`externalize_inline_media`, carrying the depth."""
     if depth > _MAX_WALK_DEPTH:
         return value
 
     if isinstance(value, str):
-        return await _externalized_data_url(session, value)
+        return await _externalized_data_url(store, value)
 
     if isinstance(value, Mapping):
         # An inline part is still a mapping like any other, so its siblings get
         # walked too. Returning early here would leave a `data:` URL sitting
         # beside the payload untouched, and would skip the rest of the mapping
         # entirely whenever the payload could not be decoded.
-        replacement = (
-            await _externalized_inline_payload(session, value[_INLINE_DATA_KEY])
-            if _is_inline_media_part(value)
-            else None
-        )
+        replacements = {
+            key: await _externalized_inline_payload(store, value[key])
+            for key in _inline_data_keys(value)
+        }
         return {
             key: replacement
-            if key == _INLINE_DATA_KEY and replacement is not None
-            else await _externalize(session, item, depth + 1)
+            if (replacement := replacements.get(key)) is not None
+            else await _externalize(store, item, depth + 1)
             for key, item in value.items()
         }
 
     if isinstance(value, Sequence) and not isinstance(value, (str, bytes)):
-        return [await _externalize(session, item, depth + 1) for item in value]
+        return [await _externalize(store, item, depth + 1) for item in value]
     return value
 
 
-async def _externalized_data_url(session: AsyncSession, value: str) -> str:
+async def _externalized_data_url(store: MediaStorer, value: str) -> str:
     """A ``data:`` URL replaced by a stored reference, or the string unchanged."""
     if not value.startswith("data:"):
         return value
@@ -332,12 +361,12 @@ async def _externalized_data_url(session: AsyncSession, value: str) -> str:
         content = reference.decode()
     except ValueError:
         return value
-    stored = await store_media(session, content)
+    stored = await store(content)
     return stored.url if stored is not None else value
 
 
 async def _externalized_inline_payload(
-    session: AsyncSession,
+    store: MediaStorer,
     inline: Mapping[str, Any],
 ) -> Optional[dict[str, Any]]:
     """
@@ -349,7 +378,7 @@ async def _externalized_inline_payload(
     decoded = _decode_inline_payload(inline[_INLINE_PAYLOAD_KEY])
     if decoded is None:
         return None
-    stored = await store_media(session, decoded)
+    stored = await store(decoded)
     if stored is None:
         return None
     replacement = {k: v for k, v in inline.items() if k != _INLINE_PAYLOAD_KEY}
@@ -384,8 +413,10 @@ def with_example_media(message: Any, original: Mapping[str, Any]) -> Any:
 
 __all__ = [
     "MEDIA_URL_KEY",
+    "MediaStorer",
     "example_media_content_blocks",
     "externalize_inline_media",
+    "replace_inline_media",
     "with_example_media",
     "span_message_media_content",
 ]
