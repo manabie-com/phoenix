@@ -16,7 +16,11 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { Drawer } from "../Drawer";
 import { DrawerPlane, OverlayFrameProvider, useOverlayFrame } from "../frame";
 
-type PageData = { promise: Promise<void>; resolve: () => void; isLoaded: () => boolean };
+type PageData = {
+  promise: Promise<void>;
+  resolve: () => void;
+  isLoaded: () => boolean;
+};
 
 function pageData(): PageData {
   let loaded = false;
