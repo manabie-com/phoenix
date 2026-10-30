@@ -2422,6 +2422,7 @@ class PromptVersionData(TypedDict):
 
 class PromptVersion(PromptVersionData):
     id: str
+    created_at: str
 
 
 class CreatePromptRequestBody(TypedDict):

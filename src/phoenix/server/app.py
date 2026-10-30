@@ -8,7 +8,7 @@ import os
 from contextlib import AbstractAsyncContextManager, AsyncExitStack
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
-from functools import cached_property
+from functools import cached_property, partial
 from pathlib import Path
 from types import MethodType
 from typing import (
@@ -33,6 +33,7 @@ import strawberry
 from fastapi import APIRouter, Depends, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.openapi.utils import get_openapi
+from fastapi.telemetry import TelemetryConfig
 from fastapi.utils import is_body_allowed_for_status_code
 from grpc.aio import ServerInterceptor
 from grpc_interceptor import AsyncServerInterceptor
@@ -95,6 +96,7 @@ from phoenix.server.agents.capabilities import MintlifyDocsMCPServer
 from phoenix.server.api.auth_messages import AUTH_ERROR_MESSAGES, AuthErrorCode
 from phoenix.server.api.context import Context, build_context
 from phoenix.server.api.dataloaders import CacheForDataLoaders
+from phoenix.server.api.redaction import RedactingOpenTelemetryExtension
 from phoenix.server.api.routers import (
     AgentSessionConflict,
     agent_session_conflict_handler,
@@ -197,6 +199,7 @@ from phoenix.version import __version__ as phoenix_version
 from .api.helpers.span_media import MediaOffloadingBulkInserter
 
 if TYPE_CHECKING:
+    from opentelemetry._logs import LoggerProvider
     from opentelemetry.trace import TracerProvider
 
     from phoenix.config import LDAPConfig
@@ -1058,24 +1061,15 @@ def create_app(
 
     if server_instrumentation_is_enabled():
         tracer_provider = initialize_opentelemetry_tracer_provider()
-        from opentelemetry.trace import TracerProvider
-        from strawberry.extensions.tracing import OpenTelemetryExtension
-
-        if TYPE_CHECKING:
-            # Type-check the class before monkey-patching its private attribute.
-            assert OpenTelemetryExtension._tracer
-
-        class _OpenTelemetryExtension(OpenTelemetryExtension):
-            def __init__(self, *args: Any, **kwargs: Any) -> None:
-                super().__init__(*args, **kwargs)
-                # Monkey-patch its private tracer to eliminate usage of the global
-                # TracerProvider, which in a notebook setting could be the one
-                # used by OpenInference.
-                self._tracer = cast(TracerProvider, tracer_provider).get_tracer("strawberry")
-
-        graphql_schema_extensions.append(_OpenTelemetryExtension)
+        # Bound to this provider rather than the global one, which in a notebook
+        # could be the provider OpenInference is using.
+        graphql_schema_extensions.append(
+            partial(RedactingOpenTelemetryExtension, tracer_provider=tracer_provider)
+        )
+    logger_provider = None
     if server_log_export_is_enabled():
-        shutdown_callbacks_list.append(initialize_opentelemetry_logger_provider().shutdown)
+        logger_provider = initialize_opentelemetry_logger_provider()
+        shutdown_callbacks_list.append(logger_provider.shutdown)
     encryption_service = EncryptionService(secret=secret)
     redactor = Redactor(secret=secret or SecretStr(""))
     sandbox_runtime = SandboxRuntimeContext(monty=MontyRuntime())
@@ -1154,6 +1148,9 @@ def create_app(
             AgentSessionConflict: agent_session_conflict_handler,
         },
         debug=debug,
+        telemetry=_native_telemetry_config(
+            tracer_provider=tracer_provider, logger_provider=logger_provider
+        ),
         swagger_ui_parameters={
             "defaultModelsExpandDepth": -1,  # hides the schema section in the Swagger UI
         },
@@ -1396,12 +1393,6 @@ def create_app(
     )
     app = _add_get_secret_method(app=app, secret=secret)
     app = _add_get_token_store_method(app=app, token_store=token_store)
-    if tracer_provider:
-        from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
-
-        FastAPIInstrumentor().instrument(tracer_provider=tracer_provider)
-        FastAPIInstrumentor.instrument_app(app, tracer_provider=tracer_provider)
-        shutdown_callbacks_list.append(FastAPIInstrumentor().uninstrument)
     if allowed_origins:
         app.add_middleware(
             CORSMiddleware,
@@ -1447,6 +1438,30 @@ def _validate_oauth2_idp_names(oauth2_client_configs: Sequence[OAuth2ClientConfi
             f"OAuth2 identity provider names cannot use reserved authorization server paths: "
             f"{names}. Reserved names: {reserved}."
         )
+
+
+def _native_telemetry_config(
+    *,
+    tracer_provider: Optional["TracerProvider"],
+    logger_provider: Optional["LoggerProvider"],
+) -> TelemetryConfig:
+    """Configure FastAPI's native OpenTelemetry support.
+
+    Request spans and log events go only to Phoenix's own providers (when server
+    instrumentation or log export is enabled), never to global providers that a host
+    process may have configured. Metrics stay off because the server exposes its
+    metrics through Prometheus instead.
+    """
+    config: TelemetryConfig = {"metrics": False}
+    if tracer_provider is not None:
+        config["tracer_provider"] = tracer_provider
+    else:
+        config["tracing"] = False
+    if logger_provider is not None:
+        config["logger_provider"] = logger_provider
+    else:
+        config["logs"] = False
+    return config
 
 
 def _add_get_secret_method(*, app: FastAPI, secret: Optional[SecretStr]) -> FastAPI:

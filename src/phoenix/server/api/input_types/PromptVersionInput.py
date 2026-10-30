@@ -50,6 +50,7 @@ from phoenix.server.api.input_types.MediaContentInput import (
 from phoenix.server.api.input_types.PromptInvocationParametersInput import (
     PromptInvocationParametersInput,
 )
+from phoenix.server.api.redaction import Redacted
 from phoenix.server.api.types.GenerativeModelCustomProvider import GenerativeModelCustomProvider
 from phoenix.server.api.types.GenerativeProvider import GenerativeProviderKey
 from phoenix.server.api.types.node import from_global_id_with_expected_type
@@ -330,7 +331,7 @@ class PromptMessageInput:
 
 @strawberry.input
 class PromptChatTemplateInput:
-    messages: list[PromptMessageInput]
+    messages: Redacted[list[PromptMessageInput]]
 
     def to_orm(self) -> PromptChatTemplate:
         return PromptChatTemplate(

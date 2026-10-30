@@ -5,7 +5,6 @@ SHELL := /bin/bash
 .DEFAULT_GOAL := help
 
 # Tools
-TOX := tox
 PNPM := pnpm
 UV := $(CURDIR)/scripts/uv.sh
 UV_BIN := uv
@@ -39,6 +38,7 @@ NC := \033[0m # No Color
 	format format-python format-frontend format-ts lint lint-python lint-frontend lint-ts clean-notebooks \
 	build build-python build-frontend build-ts \
 	mcp-skills codegen-prompts sync-models schema-ddl check-graphql-permissions check-filter-dsl-snippets check-skill-graphql-examples check-skill-filter-examples sync-docs-snippets check-docs-snippets gen-otel-models \
+	test-integration-docs \
 	gh-comment-watch \
 	harbor-stage harbor-plugin-e2e harbor-run harbor-view \
 	clean clean-all
@@ -81,6 +81,7 @@ help: ## Show this help message
 	@echo -e "  test-frontend          - Run frontend tests only (js/app/)"
 	@echo -e "  test-ts                - Run all TypeScript tests (js/ workspace)"
 	@echo -e "  test-helm              - Run Helm chart tests"
+	@echo -e "  test-integration-docs  - Run configured integration docs against a running Phoenix server"
 	@echo -e "  doctest                - Run doctests across all modules in src/ (override with MODULES=...)"
 	@echo -e "  typecheck              - Type check all code (Python + TypeScript workspace)"
 	@echo -e "  typecheck-python       - Type check Python only"
@@ -141,8 +142,6 @@ check-tools: ## Verify required tools are installed
 	@echo -e "$(GREEN)✓$(NC) uv found: $$($(UV) --version)"
 	@command -v $(PNPM) >/dev/null 2>&1 || { echo -e "$(RED)ERROR: pnpm is not installed. Run: npm install -g pnpm$(NC)"; exit 1; }
 	@echo -e "$(GREEN)✓$(NC) pnpm found: $$($(PNPM) --version)"
-	@command -v $(TOX) >/dev/null 2>&1 || { echo -e "$(RED)ERROR: tox is not installed. Run: pip install tox$(NC)"; exit 1; }
-	@echo -e "$(GREEN)✓$(NC) tox found: $$($(TOX) --version)"
 	@command -v $(NODE) >/dev/null 2>&1 || { echo -e "$(RED)ERROR: node is not installed. Install from https://nodejs.org$(NC)"; exit 1; }
 	@echo -e "$(GREEN)✓$(NC) node found: $$($(NODE) --version)"
 	@command -v dekit >/dev/null 2>&1 && echo -e "$(GREEN)✓$(NC) dekit found: $$(dekit --version)" || echo -e "$(YELLOW)WARNING: dekit is not installed (needed by make dev). Run: curl -fsSL https://dekit.run/install.sh | sh$(NC)"
@@ -287,11 +286,14 @@ dev-frontend: ## Frontend only (React dev server)
 # Testing
 #=============================================================================
 
+test-integration-docs: ## Run configured integration docs against a running Phoenix server
+	@$(UV) run python scripts/testing/integration_docs/run.py $(INTEGRATION_DOCS_ARGS)
+
 test-python: ## Run Python tests (unit + integration)
 	@echo -e "$(CYAN)Running Python unit tests...$(NC)"
-	@$(TOX) run -q -e unit_tests -- -n auto
+	@$(UV) run --all-packages pytest -q -n auto tests/unit
 	@echo -e "$(CYAN)Running Python integration tests...$(NC)"
-	@$(TOX) run -q -e integration_tests
+	@$(UV) run pytest -q tests/integration
 
 # Run doctests across all modules under src/ by default; override on the command
 # line, e.g. `make doctest MODULES="src/phoenix/foo.py src/phoenix/bar.py"`.

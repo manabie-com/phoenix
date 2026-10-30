@@ -23,7 +23,8 @@ from typing import (
 )
 
 import aiosqlite
-import httpx
+import freezegun
+import httpx2
 import pytest
 import sqlalchemy
 import sqlean
@@ -75,6 +76,10 @@ from tests.unit.vcr import CustomVCR
 
 
 def pytest_configure(config: Config) -> None:
+    # freeze_time() touches every attribute of every loaded module; daytona_sdk
+    # answers by importing submodules whose pydantic models then fail to build
+    # against FakeDatetime, and the exception leaves the patch half-applied.
+    freezegun.configure(extend_ignore_list=["daytona_sdk", "daytona_api_client"])
     config.addinivalue_line(
         "markers",
         "postgres_only: mark a test as requiring PostgreSQL (skipped under --db sqlite)",
@@ -976,13 +981,13 @@ async def asgi_app(app: FastAPI) -> AsyncIterator[ASGIApp]:
 @pytest.fixture
 def httpx_client(
     asgi_app: ASGIApp,
-) -> httpx.AsyncClient:
-    asgi_transport = httpx.ASGITransport(app=asgi_app)
-    return httpx.AsyncClient(transport=asgi_transport, base_url="http://test")
+) -> httpx2.AsyncClient:
+    asgi_transport = httpx2.ASGITransport(app=asgi_app)
+    return httpx2.AsyncClient(transport=asgi_transport, base_url="http://test")
 
 
 @pytest.fixture
-def gql_client(httpx_client: httpx.AsyncClient) -> Iterator[AsyncGraphQLClient]:
+def gql_client(httpx_client: httpx2.AsyncClient) -> Iterator[AsyncGraphQLClient]:
     yield AsyncGraphQLClient(httpx_client)
 
 
