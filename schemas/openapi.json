@@ -18988,6 +18988,12 @@
           "id": {
             "type": "string",
             "title": "Id"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At",
+            "description": "The creation timestamp of the prompt version."
           }
         },
         "type": "object",
@@ -18998,7 +19004,8 @@
           "template_type",
           "template_format",
           "invocation_parameters",
-          "id"
+          "id",
+          "created_at"
         ],
         "title": "PromptVersion"
       },
