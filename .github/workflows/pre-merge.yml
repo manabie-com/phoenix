@@ -67,7 +67,7 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  UV_VERSION: "0.12.19"
+  UV_VERSION: "0.13.5"
   # fake openai key so that llama_index doesn't download huggingface embeddings
   OPENAI_API_KEY: "sk-fake-openai-key"
 
@@ -306,9 +306,24 @@ jobs:
       # their runner VMs reclaimed ~6 minutes in ("The runner has received a
       # shutdown signal"). `-n auto` for the same reason as the unit suite: a
       # reclaimed runner costs a whole hour, a slow run only costs minutes.
+      - name: Sync dependencies
+        run: uv sync --frozen
+      # Return the next major version in response headers so all client methods
+      # work; otherwise, some may be version-gated. Mirrors upstream's python-CI.
+      - name: Report the next major server version
+        run: |
+          uv run --no-sync python - <<'EOF'
+          import re, pathlib
+          vf = pathlib.Path("src/phoenix/version.py")
+          major = int(re.search(r'"(\d+)\.', vf.read_text()).group(1))
+          vf.write_text(f'__version__ = "{major + 1}.0.0"\n')
+          EOF
       - name: Run integration tests
         timeout-minutes: 90
-        run: uvx tox run -e integration_tests -- -ra --reruns 5 -n auto
+        working-directory: tests/integration
+        env:
+          PHOENIX_MASK_INTERNAL_SERVER_ERRORS: "false"
+        run: uv run --no-sync pytest -ra --reruns 5 --timeout 360 -n auto .
 
   python-migrations:
     name: DB Migration Continuity (${{ matrix.db }}${{ matrix.concurrently && ', concurrently' || '' }})
@@ -413,8 +428,22 @@ jobs:
         uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7.6.0
         with:
           version: ${{ env.UV_VERSION }}
+      # Upstream dropped tox (#17409); these mirror its python-CI package jobs.
       - name: Run package test suite
-        run: uvx tox run -e ${{ matrix.pkg }} -- -ra -x
+        env:
+          PKG: ${{ matrix.pkg }}
+        run: |
+          dir="packages/${PKG//_/-}"
+          uv sync --frozen --no-editable --package "arize-${PKG//_/-}" --all-extras
+          cd "$dir"
+          if [ "$PKG" = phoenix_client ]; then
+            uv run --no-sync pyright .
+            uv run --no-sync mypy --strict .
+            uv run --no-sync pytest -ra -x tests/client
+          else
+            uv run --no-sync mypy .
+            uv run --no-sync pytest -ra -x .
+          fi
 
   helm-tests:
     name: Helm Chart Tests

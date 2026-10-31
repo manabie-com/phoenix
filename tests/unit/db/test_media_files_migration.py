@@ -17,6 +17,7 @@ from typing import Iterator
 
 import pytest
 import sqlalchemy as sa
+import sqlean
 from alembic import command
 from alembic.config import Config
 
@@ -67,7 +68,9 @@ def _table_exists(connection: sa.Connection) -> bool:
 
 @pytest.fixture
 def engine(tmp_path: Path) -> Iterator[sa.Engine]:
-    engine = sa.create_engine(f"sqlite:///{tmp_path / 'phoenix.db'}")
+    # sqlean, as Phoenix itself uses: upstream migrations on the chain rely on SQLite
+    # features (e.g. ALTER TABLE ... DROP CONSTRAINT) newer than the stdlib's build.
+    engine = sa.create_engine(f"sqlite:///{tmp_path / 'phoenix.db'}", module=sqlean)
     try:
         yield engine
     finally:

@@ -30,7 +30,7 @@ concurrency:
   cancel-in-progress: false
 
 env:
-  UV_VERSION: "0.12.19"
+  UV_VERSION: "0.13.5"
 
 jobs:
   python-unit-tests:
@@ -48,6 +48,13 @@ jobs:
       # resolve. Upstream's playwright.yaml sets no API keys at all, which is why
       # the same specs pass there. Reproduced locally both ways before moving it.
       OPENAI_API_KEY: "sk-fake-openai-key"
+      PHOENIX_MASK_INTERNAL_SERVER_ERRORS: "false"
+      # uv installs without bytecode by default, which leaves every xdist worker to
+      # compile each module it imports on first use.
+      UV_COMPILE_BYTECODE: "1"
+      # pytest's stdout is a block-buffered pipe on CI; unbuffered output gives each
+      # line its own timestamp in the job log.
+      PYTHONUNBUFFERED: "1"
     strategy:
       fail-fast: false
       matrix:
@@ -97,38 +104,33 @@ jobs:
       # hanging rather than the suite being too slow. SQLite passes every run.
       # The `--timeout` below exists to name that test; until a run carries its
       # failure, the culprit is unidentified.
+      # Upstream dropped tox (#17409) for `uv sync` plus pytest from tests/.
+      - name: Sync dependencies
+        run: uv sync --frozen
       - name: Run unit tests (SQLite)
         if: matrix.db == 'sqlite'
         timeout-minutes: 120
-        run: uvx tox run -e unit_tests -- -ra --reruns 5 -n auto --dist loadscope
+        working-directory: tests
+        run: uv run --no-sync pytest -ra --reruns 5 -n auto --dist loadscope unit/
       # A hung test has to be turned into a named failure, or the leg just burns
       # its timeout and reports nothing (see the note above). pytest-timeout does
       # that; core pytest's `faulthandler_timeout` does not, because under xdist
       # the worker's dump never reaches the job log -- verified, it produces no
-      # output at all with `-n 2`.
+      # output at all with `-n 2`. pytest-timeout is in upstream's dev group now.
       #
-      # It is not in upstream's requirements files, and putting it there would
-      # add fork lines to an upstream-owned file for no reason. So build the env
-      # first and install into it: tox reuses the env on the next `run`, and the
-      # `uv pip install --strict` in its commands_pre only validates consistency,
-      # it does not prune extras.
-      - name: Build unit-test environment
-        if: matrix.db == 'postgresql'
-        run: uvx tox run -e unit_tests --notest
-      - name: Add pytest-timeout to the unit-test environment
-        if: matrix.db == 'postgresql'
-        run: uv pip install --python .tox/unit_tests/bin/python pytest-timeout
       # 600s is far above any legitimate test here -- the suite's progress is
       # smooth, with no gap between progress lines over 100s -- so this fires
       # only on a genuine hang, and the run continues past it instead of dying.
       - name: Run unit tests (PostgreSQL)
         if: matrix.db == 'postgresql'
         timeout-minutes: 120
+        working-directory: tests
         run: >-
-          uvx tox run -e unit_tests --
+          uv run --no-sync pytest
           -ra --reruns 5 --db postgresql -n auto --dist loadscope
           --timeout=600
           --postgresql-exec /usr/lib/postgresql/14/bin/pg_ctl
+          unit/
       # Runs even when the step above is killed by its timeout. Disk is the
       # leading suspect: every test clones a fresh database from the template
       # via CREATE DATABASE ... TEMPLATE, and a hosted runner has ~14 GB free.
