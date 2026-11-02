@@ -17,13 +17,12 @@ from typing import Iterator
 
 import pytest
 import sqlalchemy as sa
+import sqlean
 from alembic import command
 from alembic.config import Config
+from alembic.script import ScriptDirectory
 
 import phoenix
-
-_REVISION_BEFORE = "c9d0e1f2a3b4"
-"""The revision immediately before ``media_files`` exists."""
 
 _REVISION_UNDER_TEST = "e0307b79758d"
 """Creates ``media_files``."""
@@ -34,6 +33,19 @@ def _alembic_config() -> Config:
     config = Config(str(db_package / "alembic.ini"))
     config.set_main_option("script_location", str(db_package / "migrations"))
     return config
+
+
+# Read from the migration rather than pinned: a sync re-points this migration onto
+# upstream's new head, and a pinned parent would then name a revision that is no
+# longer immediately before it.
+def _parent_revision(revision: str) -> str:
+    script = ScriptDirectory.from_config(_alembic_config()).get_revision(revision)
+    assert script is not None and isinstance(script.down_revision, str)
+    return script.down_revision
+
+
+_REVISION_BEFORE = _parent_revision(_REVISION_UNDER_TEST)
+"""The revision immediately before ``media_files`` exists."""
 
 
 def _migrate(engine: sa.Engine, revision: str, *, down: bool = False) -> None:
@@ -67,7 +79,9 @@ def _table_exists(connection: sa.Connection) -> bool:
 
 @pytest.fixture
 def engine(tmp_path: Path) -> Iterator[sa.Engine]:
-    engine = sa.create_engine(f"sqlite:///{tmp_path / 'phoenix.db'}")
+    # sqlean, as Phoenix itself uses: upstream migrations rely on SQL the stdlib
+    # sqlite3 build rejects, such as `ALTER TABLE ... DROP CONSTRAINT`.
+    engine = sa.create_engine(f"sqlite:///{tmp_path / 'phoenix.db'}", module=sqlean)
     try:
         yield engine
     finally:
