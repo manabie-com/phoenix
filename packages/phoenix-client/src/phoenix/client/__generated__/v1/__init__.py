@@ -839,7 +839,7 @@ class SecretKeyValue(TypedDict):
 
 class SessionAnnotationData(TypedDict):
     name: str
-    annotator_kind: Literal["LLM", "CODE", "HUMAN"]
+    annotator_kind: Literal["LLM", "CODE", "HUMAN", "DECISION", "AGENT"]
     session_id: str
     result: NotRequired[AnnotationResult]
     metadata: NotRequired[Mapping[str, Any]]
@@ -926,7 +926,7 @@ class SourceUrlUIPart(TypedDict):
 
 class SpanAnnotationData(TypedDict):
     name: str
-    annotator_kind: Literal["LLM", "CODE", "HUMAN"]
+    annotator_kind: Literal["LLM", "CODE", "HUMAN", "DECISION", "AGENT"]
     span_id: str
     result: NotRequired[AnnotationResult]
     metadata: NotRequired[Mapping[str, Any]]
@@ -953,7 +953,7 @@ class SpanContext(TypedDict):
 
 class SpanDocumentAnnotationData(TypedDict):
     name: str
-    annotator_kind: Literal["LLM", "CODE", "HUMAN"]
+    annotator_kind: Literal["LLM", "CODE", "HUMAN", "DECISION", "AGENT"]
     span_id: str
     document_position: int
     result: NotRequired[AnnotationResult]
@@ -1063,7 +1063,7 @@ class ToolResultContentPart(TypedDict):
 
 class TraceAnnotationData(TypedDict):
     name: str
-    annotator_kind: Literal["LLM", "CODE", "HUMAN"]
+    annotator_kind: Literal["LLM", "CODE", "HUMAN", "DECISION", "AGENT"]
     trace_id: str
     result: NotRequired[AnnotationResult]
     metadata: NotRequired[Mapping[str, Any]]
@@ -1199,7 +1199,7 @@ class UploadMediaResponseBody(TypedDict):
 class UpsertExperimentEvaluationRequestBody(TypedDict):
     experiment_run_id: str
     name: str
-    annotator_kind: Literal["LLM", "CODE", "HUMAN"]
+    annotator_kind: Literal["LLM", "CODE", "HUMAN", "DECISION", "AGENT"]
     start_time: str
     end_time: str
     result: NotRequired[ExperimentEvaluationResult]
@@ -2422,6 +2422,7 @@ class PromptVersionData(TypedDict):
 
 class PromptVersion(PromptVersionData):
     id: str
+    created_at: str
 
 
 class CreatePromptRequestBody(TypedDict):
