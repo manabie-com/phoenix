@@ -1,5 +1,18 @@
 # @arizeai/phoenix-cli
 
+## 1.20.1
+
+### Patch Changes
+
+- Updated dependencies [6e6e101]
+  - @arizeai/phoenix-client@7.18.2
+
+## 1.20.0
+
+### Minor Changes
+
+- 974be43: Add `px prompt-versions list <prompt-identifier>` with cursor pagination, optional limits, and pretty, JSON, and raw output. Show creation dates when supported by the server.
+
 ## 1.19.2
 
 ### Patch Changes
