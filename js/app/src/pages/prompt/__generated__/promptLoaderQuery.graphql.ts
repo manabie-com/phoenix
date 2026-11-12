@@ -1,5 +1,5 @@
 /**
- * @generated SignedSource<<36d05bb907818b0e077574c33222a305>>
+ * @generated SignedSource<<d37b1a5c75c18ca1eca877ddd95fea68>>
  * @lightSyntaxTransform
  */
 
@@ -166,57 +166,77 @@ v15 = {
   "alias": null,
   "args": null,
   "kind": "ScalarField",
-  "name": "createdAt",
+  "name": "hasNextPage",
   "storageKey": null
 },
-v16 = {
-  "alias": null,
-  "args": null,
-  "kind": "ScalarField",
-  "name": "sequenceNumber",
-  "storageKey": null
-},
+v16 = [
+  (v3/*:: as any*/),
+  (v4/*:: as any*/)
+],
 v17 = {
-  "alias": null,
+  "alias": "version",
   "args": null,
-  "concreteType": "User",
+  "concreteType": "PromptVersion",
   "kind": "LinkedField",
-  "name": "user",
+  "name": "node",
   "plural": false,
   "selections": [
     (v3/*:: as any*/),
+    (v11/*:: as any*/),
     {
       "alias": null,
       "args": null,
       "kind": "ScalarField",
-      "name": "username",
+      "name": "sequenceNumber",
       "storageKey": null
     },
     {
       "alias": null,
       "args": null,
       "kind": "ScalarField",
-      "name": "profilePictureUrl",
+      "name": "createdAt",
+      "storageKey": null
+    },
+    {
+      "alias": null,
+      "args": null,
+      "concreteType": "User",
+      "kind": "LinkedField",
+      "name": "user",
+      "plural": false,
+      "selections": [
+        (v3/*:: as any*/),
+        {
+          "alias": null,
+          "args": null,
+          "kind": "ScalarField",
+          "name": "username",
+          "storageKey": null
+        },
+        {
+          "alias": null,
+          "args": null,
+          "kind": "ScalarField",
+          "name": "profilePictureUrl",
+          "storageKey": null
+        }
+      ],
+      "storageKey": null
+    },
+    {
+      "alias": null,
+      "args": null,
+      "concreteType": "PromptVersionTag",
+      "kind": "LinkedField",
+      "name": "tags",
+      "plural": true,
+      "selections": (v16/*:: as any*/),
       "storageKey": null
     }
   ],
   "storageKey": null
 },
 v18 = [
-  (v3/*:: as any*/),
-  (v4/*:: as any*/)
-],
-v19 = {
-  "alias": null,
-  "args": null,
-  "concreteType": "PromptVersionTag",
-  "kind": "LinkedField",
-  "name": "tags",
-  "plural": true,
-  "selections": (v18/*:: as any*/),
-  "storageKey": null
-},
-v20 = [
   {
     "kind": "Literal",
     "name": "first",
@@ -945,28 +965,24 @@ return {
                   {
                     "alias": null,
                     "args": null,
+                    "concreteType": "PageInfo",
+                    "kind": "LinkedField",
+                    "name": "pageInfo",
+                    "plural": false,
+                    "selections": [
+                      (v15/*:: as any*/)
+                    ],
+                    "storageKey": null
+                  },
+                  {
+                    "alias": null,
+                    "args": null,
                     "concreteType": "PromptVersionEdge",
                     "kind": "LinkedField",
                     "name": "edges",
                     "plural": true,
                     "selections": [
-                      {
-                        "alias": "version",
-                        "args": null,
-                        "concreteType": "PromptVersion",
-                        "kind": "LinkedField",
-                        "name": "node",
-                        "plural": false,
-                        "selections": [
-                          (v3/*:: as any*/),
-                          (v11/*:: as any*/),
-                          (v15/*:: as any*/),
-                          (v16/*:: as any*/),
-                          (v17/*:: as any*/),
-                          (v19/*:: as any*/)
-                        ],
-                        "storageKey": null
-                      }
+                      (v17/*:: as any*/)
                     ],
                     "storageKey": null
                   }
@@ -995,7 +1011,7 @@ return {
               },
               {
                 "alias": "pagedVersions",
-                "args": (v20/*:: as any*/),
+                "args": (v18/*:: as any*/),
                 "concreteType": "PromptVersionConnection",
                 "kind": "LinkedField",
                 "name": "promptVersions",
@@ -1009,23 +1025,7 @@ return {
                     "name": "edges",
                     "plural": true,
                     "selections": [
-                      {
-                        "alias": "version",
-                        "args": null,
-                        "concreteType": "PromptVersion",
-                        "kind": "LinkedField",
-                        "name": "node",
-                        "plural": false,
-                        "selections": [
-                          (v3/*:: as any*/),
-                          (v11/*:: as any*/),
-                          (v16/*:: as any*/),
-                          (v15/*:: as any*/),
-                          (v17/*:: as any*/),
-                          (v19/*:: as any*/)
-                        ],
-                        "storageKey": null
-                      },
+                      (v17/*:: as any*/),
                       {
                         "alias": null,
                         "args": null,
@@ -1064,13 +1064,7 @@ return {
                         "name": "endCursor",
                         "storageKey": null
                       },
-                      {
-                        "alias": null,
-                        "args": null,
-                        "kind": "ScalarField",
-                        "name": "hasNextPage",
-                        "storageKey": null
-                      }
+                      (v15/*:: as any*/)
                     ],
                     "storageKey": null
                   }
@@ -1079,7 +1073,7 @@ return {
               },
               {
                 "alias": "pagedVersions",
-                "args": (v20/*:: as any*/),
+                "args": (v18/*:: as any*/),
                 "filters": null,
                 "handle": "connection",
                 "key": "PromptVersionsList__pagedVersions",
@@ -1093,7 +1087,7 @@ return {
                 "kind": "LinkedField",
                 "name": "sourcePrompt",
                 "plural": false,
-                "selections": (v18/*:: as any*/),
+                "selections": (v16/*:: as any*/),
                 "storageKey": null
               },
               {
@@ -1113,12 +1107,12 @@ return {
     ]
   },
   "params": {
-    "cacheID": "b631b4932a37386f232b6462d4f1373d",
+    "cacheID": "c5491496a6f7330e5a22eee7ef4fe9a1",
     "id": null,
     "metadata": {},
     "name": "promptLoaderQuery",
     "operationKind": "query",
-    "text": "query promptLoaderQuery(\n  $id: ID!\n) {\n  prompt: node(id: $id) {\n    __typename\n    id\n    ... on Prompt {\n      name\n      ...PromptIndexPage__main\n      ...PromptVersionsPageContent__main\n      ...PromptLayout__main\n    }\n  }\n}\n\nfragment EditPromptButton_data on Prompt {\n  id\n  description\n  metadata\n}\n\nfragment PromptChatMessagesCard__main on PromptVersion {\n  provider: modelProvider\n  template {\n    __typename\n    ... on PromptChatTemplate {\n      messages {\n        role\n        content {\n          __typename\n          ... on TextContentPart {\n            text {\n              text\n            }\n          }\n          ...mediaContentPartFragment\n          ... on ToolCallContentPart {\n            toolCall {\n              toolCallId\n              toolCall {\n                arguments\n                name\n              }\n            }\n          }\n          ... on ToolResultContentPart {\n            toolResult {\n              toolCallId\n              result\n            }\n          }\n        }\n      }\n    }\n    ... on PromptStringTemplate {\n      template\n    }\n  }\n  templateType\n  templateFormat\n}\n\nfragment PromptCodeExportCard__main on PromptVersion {\n  id\n  invocationParameters {\n    __typename\n    ...PromptInvocationParametersReadableFragment\n  }\n  modelName\n  modelProvider\n  responseFormat {\n    jsonSchema {\n      name\n      description\n      schema\n      strict\n    }\n  }\n  tools {\n    tools {\n      __typename\n      ... on PromptToolFunction {\n        function {\n          name\n          description\n          parameters\n          strict\n        }\n      }\n      ... on PromptToolRaw {\n        raw\n      }\n    }\n    toolChoice {\n      type\n      functionName\n    }\n    disableParallelToolCalls\n  }\n  template {\n    __typename\n    ... on PromptChatTemplate {\n      messages {\n        role\n        content {\n          __typename\n          ... on TextContentPart {\n            __typename\n            text {\n              text\n            }\n          }\n          ... on ToolCallContentPart {\n            __typename\n            toolCall {\n              toolCallId\n              toolCall {\n                name\n                arguments\n              }\n            }\n          }\n          ... on ToolResultContentPart {\n            __typename\n            toolResult {\n              toolCallId\n              result\n            }\n          }\n        }\n      }\n    }\n    ... on PromptStringTemplate {\n      template\n    }\n  }\n  templateFormat\n  templateType\n}\n\nfragment PromptIndexPage__aside on Prompt {\n  id\n  name\n  description\n  metadata\n  ...PromptLatestVersionsListFragment\n  ...EditPromptButton_data\n  ...PromptLabels\n}\n\nfragment PromptIndexPage__main on Prompt {\n  promptVersions {\n    edges {\n      node {\n        ...PromptInvocationParameters__main\n        ...PromptChatMessagesCard__main\n        ...PromptCodeExportCard__main\n        ...PromptModelConfigurationCard__main\n        id\n      }\n    }\n  }\n  ...PromptIndexPage__aside\n}\n\nfragment PromptInvocationParametersReadableFragment on PromptInvocationParameters {\n  __isPromptInvocationParameters: __typename\n  __typename\n  ... on PromptOpenAIInvocationParameters {\n    temperature\n    openaiMaxTokens: maxTokens\n    maxCompletionTokens\n    frequencyPenalty\n    presencePenalty\n    topP\n    seed\n    stop\n    reasoningEffort\n    extraBody\n  }\n  ... on PromptAnthropicInvocationParameters {\n    anthropicMaxTokens: maxTokens\n    temperature\n    topP\n    stopSequences\n    outputConfig {\n      effort\n    }\n    thinking {\n      __typename\n      ... on PromptAnthropicThinkingDisabled {\n        disabled\n      }\n      ... on PromptAnthropicThinkingEnabled {\n        budgetTokens\n        enabledDisplay: display\n      }\n      ... on PromptAnthropicThinkingAdaptive {\n        adaptiveDisplay: display\n      }\n    }\n    extraBody\n  }\n  ... on PromptGoogleInvocationParameters {\n    temperature\n    maxOutputTokens\n    stopSequences\n    presencePenalty\n    frequencyPenalty\n    topP\n    topK\n    thinkingConfig {\n      thinkingBudget\n      thinkingLevel\n      includeThoughts\n    }\n  }\n  ... on PromptAwsInvocationParameters {\n    awsMaxTokens: maxTokens\n    temperature\n    topP\n    stopSequences\n  }\n}\n\nfragment PromptInvocationParameters__main on PromptVersion {\n  invocationParameters {\n    __typename\n    ...PromptInvocationParametersReadableFragment\n  }\n  tools {\n    toolChoice {\n      type\n      functionName\n    }\n  }\n}\n\nfragment PromptLLM__main on PromptVersion {\n  model: modelName\n  provider: modelProvider\n}\n\nfragment PromptLabels on Prompt {\n  labels {\n    name\n    color\n    id\n  }\n}\n\nfragment PromptLatestVersionsListFragment on Prompt {\n  latestVersions: promptVersions(first: 5) {\n    edges {\n      version: node {\n        id\n        description\n        createdAt\n        sequenceNumber\n        ...PromptVersionSummaryFragment\n      }\n    }\n  }\n}\n\nfragment PromptLayout__main on Prompt {\n  id\n  name\n  description\n  metadata\n  sourcePrompt {\n    id\n    name\n  }\n  versionCount\n}\n\nfragment PromptModelConfigurationCard__main on PromptVersion {\n  model: modelName\n  provider: modelProvider\n  ...PromptLLM__main\n  ...PromptInvocationParameters__main\n  ...PromptTools__main\n  ...PromptResponseFormatFragment\n}\n\nfragment PromptResponseFormatFragment on PromptVersion {\n  responseFormat {\n    jsonSchema {\n      name\n      description\n      schema\n      strict\n    }\n  }\n}\n\nfragment PromptTools__main on PromptVersion {\n  tools {\n    tools {\n      __typename\n      ... on PromptToolFunction {\n        function {\n          name\n          description\n          parameters\n          strict\n        }\n      }\n      ... on PromptToolRaw {\n        raw\n      }\n    }\n  }\n}\n\nfragment PromptVersionSummaryFragment on PromptVersion {\n  id\n  description\n  sequenceNumber\n  createdAt\n  user {\n    id\n    username\n    profilePictureUrl\n  }\n  ...PromptVersionTagsList_data\n}\n\nfragment PromptVersionTagsList_data on PromptVersion {\n  tags {\n    id\n    name\n  }\n}\n\nfragment PromptVersionsList__main on Prompt {\n  pagedVersions: promptVersions(first: 50) {\n    edges {\n      version: node {\n        id\n        ...PromptVersionSummaryFragment\n      }\n      cursor\n      node {\n        __typename\n        id\n      }\n    }\n    pageInfo {\n      endCursor\n      hasNextPage\n    }\n  }\n  id\n}\n\nfragment PromptVersionsPageContent__main on Prompt {\n  ...PromptVersionsList__main\n}\n\nfragment mediaContentPartFragment on ContentPart {\n  __isContentPart: __typename\n  ... on ImageContentPart {\n    image {\n      __typename\n      ... on ImageContentValue {\n        url\n        mediaType\n      }\n      ... on ImageVariableValue {\n        variable\n      }\n    }\n  }\n  ... on FileContentPart {\n    file {\n      __typename\n      ... on ImageContentValue {\n        url\n        mediaType\n      }\n      ... on ImageVariableValue {\n        variable\n      }\n    }\n  }\n}\n"
+    "text": "query promptLoaderQuery(\n  $id: ID!\n) {\n  prompt: node(id: $id) {\n    __typename\n    id\n    ... on Prompt {\n      name\n      ...PromptIndexPage__main\n      ...PromptVersionsPageContent__main\n      ...PromptLayout__main\n    }\n  }\n}\n\nfragment EditPromptButton_data on Prompt {\n  id\n  description\n  metadata\n}\n\nfragment PromptChatMessagesCard__main on PromptVersion {\n  provider: modelProvider\n  template {\n    __typename\n    ... on PromptChatTemplate {\n      messages {\n        role\n        content {\n          __typename\n          ... on TextContentPart {\n            text {\n              text\n            }\n          }\n          ...mediaContentPartFragment\n          ... on ToolCallContentPart {\n            toolCall {\n              toolCallId\n              toolCall {\n                arguments\n                name\n              }\n            }\n          }\n          ... on ToolResultContentPart {\n            toolResult {\n              toolCallId\n              result\n            }\n          }\n        }\n      }\n    }\n    ... on PromptStringTemplate {\n      template\n    }\n  }\n  templateType\n  templateFormat\n}\n\nfragment PromptCodeExportCard__main on PromptVersion {\n  id\n  invocationParameters {\n    __typename\n    ...PromptInvocationParametersReadableFragment\n  }\n  modelName\n  modelProvider\n  responseFormat {\n    jsonSchema {\n      name\n      description\n      schema\n      strict\n    }\n  }\n  tools {\n    tools {\n      __typename\n      ... on PromptToolFunction {\n        function {\n          name\n          description\n          parameters\n          strict\n        }\n      }\n      ... on PromptToolRaw {\n        raw\n      }\n    }\n    toolChoice {\n      type\n      functionName\n    }\n    disableParallelToolCalls\n  }\n  template {\n    __typename\n    ... on PromptChatTemplate {\n      messages {\n        role\n        content {\n          __typename\n          ... on TextContentPart {\n            __typename\n            text {\n              text\n            }\n          }\n          ... on ToolCallContentPart {\n            __typename\n            toolCall {\n              toolCallId\n              toolCall {\n                name\n                arguments\n              }\n            }\n          }\n          ... on ToolResultContentPart {\n            __typename\n            toolResult {\n              toolCallId\n              result\n            }\n          }\n        }\n      }\n    }\n    ... on PromptStringTemplate {\n      template\n    }\n  }\n  templateFormat\n  templateType\n}\n\nfragment PromptIndexPage__aside on Prompt {\n  id\n  name\n  description\n  metadata\n  ...PromptLatestVersionsListFragment\n  ...EditPromptButton_data\n  ...PromptLabels\n}\n\nfragment PromptIndexPage__main on Prompt {\n  promptVersions {\n    edges {\n      node {\n        ...PromptInvocationParameters__main\n        ...PromptChatMessagesCard__main\n        ...PromptCodeExportCard__main\n        ...PromptModelConfigurationCard__main\n        id\n      }\n    }\n  }\n  ...PromptIndexPage__aside\n}\n\nfragment PromptInvocationParametersReadableFragment on PromptInvocationParameters {\n  __isPromptInvocationParameters: __typename\n  __typename\n  ... on PromptOpenAIInvocationParameters {\n    temperature\n    openaiMaxTokens: maxTokens\n    maxCompletionTokens\n    frequencyPenalty\n    presencePenalty\n    topP\n    seed\n    stop\n    reasoningEffort\n    extraBody\n  }\n  ... on PromptAnthropicInvocationParameters {\n    anthropicMaxTokens: maxTokens\n    temperature\n    topP\n    stopSequences\n    outputConfig {\n      effort\n    }\n    thinking {\n      __typename\n      ... on PromptAnthropicThinkingDisabled {\n        disabled\n      }\n      ... on PromptAnthropicThinkingEnabled {\n        budgetTokens\n        enabledDisplay: display\n      }\n      ... on PromptAnthropicThinkingAdaptive {\n        adaptiveDisplay: display\n      }\n    }\n    extraBody\n  }\n  ... on PromptGoogleInvocationParameters {\n    temperature\n    maxOutputTokens\n    stopSequences\n    presencePenalty\n    frequencyPenalty\n    topP\n    topK\n    thinkingConfig {\n      thinkingBudget\n      thinkingLevel\n      includeThoughts\n    }\n  }\n  ... on PromptAwsInvocationParameters {\n    awsMaxTokens: maxTokens\n    temperature\n    topP\n    stopSequences\n  }\n}\n\nfragment PromptInvocationParameters__main on PromptVersion {\n  invocationParameters {\n    __typename\n    ...PromptInvocationParametersReadableFragment\n  }\n  tools {\n    toolChoice {\n      type\n      functionName\n    }\n  }\n}\n\nfragment PromptLLM__main on PromptVersion {\n  model: modelName\n  provider: modelProvider\n}\n\nfragment PromptLabels on Prompt {\n  labels {\n    name\n    color\n    id\n  }\n}\n\nfragment PromptLatestVersionsListFragment on Prompt {\n  latestVersions: promptVersions(first: 5) {\n    pageInfo {\n      hasNextPage\n    }\n    edges {\n      version: node {\n        id\n        ...PromptVersionSummaryFragment\n      }\n    }\n  }\n}\n\nfragment PromptLayout__main on Prompt {\n  id\n  name\n  description\n  metadata\n  sourcePrompt {\n    id\n    name\n  }\n  versionCount\n}\n\nfragment PromptModelConfigurationCard__main on PromptVersion {\n  model: modelName\n  provider: modelProvider\n  ...PromptLLM__main\n  ...PromptInvocationParameters__main\n  ...PromptTools__main\n  ...PromptResponseFormatFragment\n}\n\nfragment PromptResponseFormatFragment on PromptVersion {\n  responseFormat {\n    jsonSchema {\n      name\n      description\n      schema\n      strict\n    }\n  }\n}\n\nfragment PromptTools__main on PromptVersion {\n  tools {\n    tools {\n      __typename\n      ... on PromptToolFunction {\n        function {\n          name\n          description\n          parameters\n          strict\n        }\n      }\n      ... on PromptToolRaw {\n        raw\n      }\n    }\n  }\n}\n\nfragment PromptVersionSummaryFragment on PromptVersion {\n  id\n  description\n  sequenceNumber\n  createdAt\n  user {\n    id\n    username\n    profilePictureUrl\n  }\n  tags {\n    id\n  }\n  ...PromptVersionTagsList_data\n}\n\nfragment PromptVersionTagsList_data on PromptVersion {\n  tags {\n    id\n    name\n  }\n}\n\nfragment PromptVersionsList__main on Prompt {\n  pagedVersions: promptVersions(first: 50) {\n    edges {\n      version: node {\n        id\n        ...PromptVersionSummaryFragment\n      }\n      cursor\n      node {\n        __typename\n        id\n      }\n    }\n    pageInfo {\n      endCursor\n      hasNextPage\n    }\n  }\n  id\n}\n\nfragment PromptVersionsPageContent__main on Prompt {\n  ...PromptVersionsList__main\n}\n\nfragment mediaContentPartFragment on ContentPart {\n  __isContentPart: __typename\n  ... on ImageContentPart {\n    image {\n      __typename\n      ... on ImageContentValue {\n        url\n        mediaType\n      }\n      ... on ImageVariableValue {\n        variable\n      }\n    }\n  }\n  ... on FileContentPart {\n    file {\n      __typename\n      ... on ImageContentValue {\n        url\n        mediaType\n      }\n      ... on ImageVariableValue {\n        variable\n      }\n    }\n  }\n}\n"
   }
 };
 })();
