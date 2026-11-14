@@ -2035,7 +2035,7 @@ class TestExperimentsIntegration:
 
         await _await_or_return(client.experiments.delete(experiment_id=experiment["id"]))
 
-        data, _ = _gql(_app, api_key, query="{ projects { edges { node { name } } } }")
+        data, _ = _gql(_app, api_key, query="{ projects(first: 1000) { edges { node { name } } } }")
         project_names = [e["node"]["name"] for e in data["data"]["projects"]["edges"]]
         assert project_name in project_names
 
@@ -2066,7 +2066,7 @@ class TestExperimentsIntegration:
             client.experiments.delete(experiment_id=experiment["id"], delete_project=True)
         )
 
-        data, _ = _gql(_app, api_key, query="{ projects { edges { node { name } } } }")
+        data, _ = _gql(_app, api_key, query="{ projects(first: 1000) { edges { node { name } } } }")
         project_names = [e["node"]["name"] for e in data["data"]["projects"]["edges"]]
         assert project_name not in project_names
 
