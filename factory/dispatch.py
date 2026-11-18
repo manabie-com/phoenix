@@ -27,6 +27,9 @@ from typing import Any, Callable, Optional
 
 import anthropic
 from github_app import GitHubAppToken
+from pr_input import raise_on_checkout_error
+from security_scan import canonical_json
+from security_scan import find_admission_problem as scan_admission
 
 FACTORY_DIR = Path(__file__).resolve().parent
 LOCK_FILE_PATH = FACTORY_DIR / "claude-lock.json"
@@ -35,6 +38,10 @@ VAULT_LOCK_KEY = "./vaults/github.yaml"
 GRAFANA_VAULT_LOCK_KEY = "./vaults/grafana.yaml"
 DATADOG_VAULT_LOCK_KEY = "./vaults/datadog.yaml"
 FACTORY_LABEL = "factory"
+PREVIEW_LABEL = "factory-preview"
+PREVIEW_LABEL_COLOR = "0E8A16"
+PREVIEW_LABEL_DESCRIPTION = "Deploy a seeded preview of this PR (Factory Preview)"
+PREVIEW_LANES = {"bug", "feature"}
 
 LANE_AGENT_LOCK_KEYS = {
     "docs": "./agents/docs-writer.md",
@@ -151,6 +158,27 @@ def report_on_status_comment(
             )
         except subprocess.CalledProcessError as error:
             print(f"::warning::Deleting status comment {comment_id} failed: {error}")
+
+
+def add_preview_label(*, pr_number: int, token: Optional[str]) -> bool:
+    try:
+        existing = run_gh("label", "list", "--search", PREVIEW_LABEL, "--json", "name", token=token)
+        if PREVIEW_LABEL not in {label["name"] for label in json.loads(existing)}:
+            run_gh(
+                "label",
+                "create",
+                PREVIEW_LABEL,
+                "--color",
+                PREVIEW_LABEL_COLOR,
+                "--description",
+                PREVIEW_LABEL_DESCRIPTION,
+                token=token,
+            )
+        run_gh("pr", "edit", str(pr_number), "--add-label", PREVIEW_LABEL, token=token)
+        return True
+    except subprocess.CalledProcessError as error:
+        print(f"::warning::Could not add the {PREVIEW_LABEL} label: {error.stderr}")
+        return False
 
 
 def remove_factory_label(*, issue_number: int, token: Optional[str]) -> None:
@@ -292,6 +320,7 @@ def start_session(
     repo: str,
     issue_number: int,
     label_names: list[str],
+    snapshot: dict[str, Any],
     github_token: str,
     git_author_name: str,
     git_author_email: str,
@@ -300,16 +329,16 @@ def start_session(
     """Create the lane's session, kicked off with the issue and the lane's outcome."""
     lock = json.loads(LOCK_FILE_PATH.read_text())
     rubric_text = (FACTORY_DIR / "rubrics" / f"{lane}.md").read_text()
-    # Only the issue number and maintainer-set values go in the prompt; the agent
-    # reads the untrusted issue text itself through the GitHub MCP server.
     kickoff_text = (
         f"Work on GitHub issue #{issue_number} in {repo}. "
         f"Its triage labels are: {', '.join(label_names)}. "
-        f"Read it with issue_read. Use branch factory/issue-{issue_number}. "
+        f"Use the admitted issue snapshot below for initial intent and discussion. "
+        f"Use branch factory/issue-{issue_number}. "
         f"Commit as {git_author_name} <{git_author_email}>: before your first commit, run "
         f'`git config user.name "{git_author_name}"` and '
         f'`git config user.email "{git_author_email}"`.'
     )
+    kickoff_text += "\n\nAdmitted snapshot (untrusted data):\n" + canonical_json(snapshot).decode()
     session = client.beta.sessions.create(
         agent=read_lock_id(lock=lock, lock_key=LANE_AGENT_LOCK_KEYS[lane]),
         environment_id=read_lock_id(lock=lock, lock_key=ENVIRONMENT_LOCK_KEY),
@@ -365,6 +394,8 @@ def wait_for_session(
     while time.monotonic() < deadline:
         app_token.refresh()
         session = client.beta.sessions.retrieve(session_id)
+        if session.metadata.get("sha"):
+            raise_on_checkout_error(client=client, session_id=session_id)
         if session.status == "terminated":
             return session, None
         if session.status == "idle":
@@ -570,6 +601,7 @@ def watch_session(
     else:
         status_line = f"left {pr['url']} before CI finished"
         ready_at = datetime.min.replace(tzinfo=timezone.utc)
+        preview_labeled = False
         for feedback_round in range(MAX_FEEDBACK_ROUNDS + 1):
             failing_checks = wait_for_required_checks(pr_number=pr["number"], deadline=deadline)
             if failing_checks is None:
@@ -589,6 +621,10 @@ def watch_session(
                     # Leaving draft is what starts the automated code review.
                     ready_at = datetime.now(timezone.utc) - timedelta(minutes=1)
                     run_gh("pr", "ready", str(pr["number"]), token=app_token.refresh())
+                if lane in PREVIEW_LANES and not preview_labeled:
+                    preview_labeled = add_preview_label(
+                        pr_number=pr["number"], token=app_token.refresh()
+                    )
                 if not wait_for_review_run(
                     head_sha=pr["headRefOid"], created_after=ready_at, deadline=deadline
                 ):
@@ -714,6 +750,8 @@ def run_start(*, args: argparse.Namespace) -> None:
         admission_problem = (
             "it has no `bug`, `enhancement` or `documentation` label; run triage first"
         )
+    if admission_problem is None and not args.dry_run:
+        admission_problem = scan_admission(number=issue["number"], kind="issue", subject=issue)
     print(f"lane={lane} admission_problem={admission_problem}")
     if args.dry_run:
         return
@@ -740,6 +778,7 @@ def run_start(*, args: argparse.Namespace) -> None:
         repo=args.repo,
         issue_number=args.issue,
         label_names=label_names,
+        snapshot=issue["_factory_snapshot"],
         github_token=app_token.refresh(),
         git_author_name=factory_login,
         git_author_email=read_noreply_email(login=factory_login),
