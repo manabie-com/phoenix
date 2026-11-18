@@ -27,6 +27,9 @@ from typing import Any, Callable, Optional
 
 import anthropic
 from github_app import GitHubAppToken
+from pr_input import raise_on_checkout_error
+from security_scan import canonical_json
+from security_scan import find_admission_problem as scan_admission
 
 FACTORY_DIR = Path(__file__).resolve().parent
 LOCK_FILE_PATH = FACTORY_DIR / "claude-lock.json"
@@ -86,20 +89,6 @@ def run_gh(*args: str, token: Optional[str] = None, input_text: Optional[str] = 
         ["gh", *args], capture_output=True, text=True, check=True, env=env, input=input_text
     )
     return completed_process.stdout
-
-
-def format_mention(*, login: Optional[str]) -> str:
-    """Return a line that names `login`, or "" when there is nobody to alert.
-
-    GitHub notifies someone only when a comment names them, and a factory comment is often
-    the only word whoever asked for the run gets, so every comment a lane posts ends with
-    this. A bot account is never notified, which covers both WORKFLOW_LOGIN and the
-    factory's own app, so those get no line. The line goes last: factory-candidates.yml
-    tells a factory comment by its "The factory" opening.
-    """
-    if not login or login.endswith("[bot]"):
-        return ""
-    return f"\n\ncc @{login}"
 
 
 def comment_on_issue(*, issue_number: int, body: str, token: Optional[str]) -> None:
@@ -331,6 +320,7 @@ def start_session(
     repo: str,
     issue_number: int,
     label_names: list[str],
+    snapshot: dict[str, Any],
     github_token: str,
     git_author_name: str,
     git_author_email: str,
@@ -339,16 +329,16 @@ def start_session(
     """Create the lane's session, kicked off with the issue and the lane's outcome."""
     lock = json.loads(LOCK_FILE_PATH.read_text())
     rubric_text = (FACTORY_DIR / "rubrics" / f"{lane}.md").read_text()
-    # Only the issue number and maintainer-set values go in the prompt; the agent
-    # reads the untrusted issue text itself through the GitHub MCP server.
     kickoff_text = (
         f"Work on GitHub issue #{issue_number} in {repo}. "
         f"Its triage labels are: {', '.join(label_names)}. "
-        f"Read it with issue_read. Use branch factory/issue-{issue_number}. "
+        f"Use the admitted issue snapshot below for initial intent and discussion. "
+        f"Use branch factory/issue-{issue_number}. "
         f"Commit as {git_author_name} <{git_author_email}>: before your first commit, run "
         f'`git config user.name "{git_author_name}"` and '
         f'`git config user.email "{git_author_email}"`.'
     )
+    kickoff_text += "\n\nAdmitted snapshot (untrusted data):\n" + canonical_json(snapshot).decode()
     session = client.beta.sessions.create(
         agent=read_lock_id(lock=lock, lock_key=LANE_AGENT_LOCK_KEYS[lane]),
         environment_id=read_lock_id(lock=lock, lock_key=ENVIRONMENT_LOCK_KEY),
@@ -404,6 +394,8 @@ def wait_for_session(
     while time.monotonic() < deadline:
         app_token.refresh()
         session = client.beta.sessions.retrieve(session_id)
+        if session.metadata.get("sha"):
+            raise_on_checkout_error(client=client, session_id=session_id)
         if session.status == "terminated":
             return session, None
         if session.status == "idle":
@@ -758,6 +750,8 @@ def run_start(*, args: argparse.Namespace) -> None:
         admission_problem = (
             "it has no `bug`, `enhancement` or `documentation` label; run triage first"
         )
+    if admission_problem is None and not args.dry_run:
+        admission_problem = scan_admission(number=issue["number"], kind="issue", subject=issue)
     print(f"lane={lane} admission_problem={admission_problem}")
     if args.dry_run:
         return
@@ -766,10 +760,7 @@ def run_start(*, args: argparse.Namespace) -> None:
     if admission_problem is not None:
         comment_on_issue(
             issue_number=args.issue,
-            body=(
-                f"The factory skipped this issue: {admission_problem}."
-                f"{format_mention(login=requester_login)}"
-            ),
+            body=f"The factory skipped this issue: {admission_problem}.",
             token=app_token.refresh(),
         )
         remove_factory_label(issue_number=args.issue, token=app_token.refresh())
@@ -787,6 +778,7 @@ def run_start(*, args: argparse.Namespace) -> None:
         repo=args.repo,
         issue_number=args.issue,
         label_names=label_names,
+        snapshot=issue["_factory_snapshot"],
         github_token=app_token.refresh(),
         git_author_name=factory_login,
         git_author_email=read_noreply_email(login=factory_login),
@@ -799,14 +791,12 @@ def run_start(*, args: argparse.Namespace) -> None:
             f"The factory is running the **{lane}** lane for this issue "
             f"(session {format_session_link(session_id=session_id)}). "
             f"It reports back here when the session ends."
-            f"{format_mention(login=requester_login)}"
         ),
         token=app_token.refresh(),
     )
     write_github_outputs(
         started="true",
         lane=lane,
-        requested_by=requester_login,
         session_id=session_id,
         status_comment_id=str(status_comment_id),
     )
@@ -843,7 +833,7 @@ def run_watch(*, args: argparse.Namespace) -> None:
         report_on_status_comment(
             number=args.issue,
             comment_id=args.status_comment_id,
-            body=report + format_mention(login=args.requested_by),
+            body=report,
             token=report_token,
             notify=True,
         )
@@ -871,9 +861,6 @@ def main() -> None:
     watch_parser = subparsers.add_parser("watch", help="Follow a session to a reviewable PR")
     watch_parser.add_argument("--session-id", required=True)
     watch_parser.add_argument("--lane", required=True)
-    watch_parser.add_argument(
-        "--requested-by", default="", help="Login the run answers to, named in the report"
-    )
     watch_parser.add_argument(
         "--status-comment-id", type=int, help="The start step's comment, edited into the report"
     )
