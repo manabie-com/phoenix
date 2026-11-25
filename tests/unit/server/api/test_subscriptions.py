@@ -1,7 +1,8 @@
+import asyncio
 import json
 import re
 from datetime import datetime
-from typing import Any, Awaitable, Callable, Mapping, Optional, cast
+from typing import Any, AsyncIterator, Awaitable, Callable, Mapping, Optional, cast
 
 import anyio
 import pytest
@@ -28,6 +29,7 @@ from phoenix.db.types.annotation_configs import (
 )
 from phoenix.db.types.evaluators import InputMapping
 from phoenix.db.types.prompts import PromptMessageRole, PromptTemplateFormat
+from phoenix.server.api import subscriptions
 from phoenix.server.api.input_types.ChatCompletionInput import ChatCompletionInput
 from phoenix.server.api.input_types.PromptInvocationParametersInput import (
     AnthropicThinkingEnabledInput,
@@ -46,6 +48,7 @@ from phoenix.server.api.subscriptions import _stream_single_chat_completion
 from phoenix.server.api.types.ChatCompletionSubscriptionPayload import (
     ChatCompletionSubscriptionError,
     ChatCompletionSubscriptionExperiment,
+    ChatCompletionSubscriptionPayload,
     ChatCompletionSubscriptionResult,
     EvaluationChunk,
     TextChunk,
@@ -234,6 +237,63 @@ class TestChatCompletionSubscription:
         assert isinstance(payloads[0], ChatCompletionSubscriptionError)
         assert "The thinking budget must be less than max tokens." in payloads[0].message
 
+    async def test_playground_timeout_setting_bounds_the_wait_for_each_chunk(
+        self,
+        gql_client: AsyncGraphQLClient,
+        openai_api_key: str,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """PHOENIX_PLAYGROUND_TIMEOUT_SECONDS is what the playground waits for the next chunk."""
+        monkeypatch.setenv("PHOENIX_PLAYGROUND_TIMEOUT_SECONDS", "1")
+        second_chunk_released = anyio.Event()
+
+        async def stalled_stream(
+            **kwargs: Any,
+        ) -> AsyncIterator[ChatCompletionSubscriptionPayload]:
+            yield TextChunk(content="first", repetition_number=kwargs["repetition_number"])
+            await second_chunk_released.wait()  # never set: the model stalls
+
+        timeouts: list[int] = []
+        create_task_with_timeout = subscriptions._create_task_with_timeout
+
+        def spy(iterable: AsyncIterator[Any], timeout_in_seconds: int = 90) -> "asyncio.Task[Any]":
+            timeouts.append(timeout_in_seconds)
+            return create_task_with_timeout(iterable, timeout_in_seconds=timeout_in_seconds)
+
+        monkeypatch.setattr(subscriptions, "_stream_single_chat_completion", stalled_stream)
+        monkeypatch.setattr(subscriptions, "_create_task_with_timeout", spy)
+        variables: dict[str, Any] = {
+            "input": {
+                "promptVersion": {
+                    "templateFormat": "NONE",
+                    "template": {
+                        "messages": [{"role": "USER", "content": [{"text": {"text": "hello"}}]}]
+                    },
+                    "modelProvider": "OPENAI",
+                    "modelName": "gpt-4",
+                    "invocationParameters": {"openai": {}},
+                    "tools": None,
+                },
+                "repetitions": 1,
+            },
+        }
+        with anyio.fail_after(30):  # the default of 90 seconds would trip this
+            payloads = [
+                payload["chatCompletion"]
+                async for payload in gql_client.subscription(
+                    query=self.QUERY,
+                    variables=variables,
+                    operation_name="ChatCompletionSubscription",
+                )
+            ]
+
+        assert [payload["__typename"] for payload in payloads] == [
+            TextChunk.__name__,
+            ChatCompletionSubscriptionError.__name__,
+        ]
+        assert payloads[1]["message"] == "Playground task timed out"
+        assert timeouts == [1, 1]
+
     async def test_openai_text_response_emits_expected_payloads_and_records_expected_span(
         self,
         gql_client: AsyncGraphQLClient,
@@ -259,7 +319,7 @@ class TestChatCompletionSubscription:
                         ]
                     },
                     "modelProvider": "OPENAI",
-                    "modelName": "gpt-4",
+                    "modelName": "gpt-4o",
                     "invocationParameters": {"openai": {"temperature": 0.1}},
                     "tools": None,
                 },
@@ -349,7 +409,7 @@ class TestChatCompletionSubscription:
         assert not span
 
         assert attributes.pop(OPENINFERENCE_SPAN_KIND) == LLM
-        assert attributes.pop(LLM_MODEL_NAME) == "gpt-4"
+        assert attributes.pop(LLM_MODEL_NAME) == "gpt-4o"
         assert isinstance(invocation_parameters := attributes.pop("llm.invocation_parameters"), str)
         assert json.loads(invocation_parameters) == {
             "temperature": 0.1,
@@ -410,7 +470,7 @@ class TestChatCompletionSubscription:
                         ]
                     },
                     "modelProvider": "OPENAI",
-                    "modelName": "gpt-4",
+                    "modelName": "gpt-4o",
                     "invocationParameters": {"openai": {"temperature": 0.1}},
                     "tools": None,
                 },
@@ -501,7 +561,7 @@ class TestChatCompletionSubscription:
         assert not span
 
         assert attributes.pop(OPENINFERENCE_SPAN_KIND) == LLM
-        assert attributes.pop(LLM_MODEL_NAME) == "gpt-4"
+        assert attributes.pop(LLM_MODEL_NAME) == "gpt-4o"
         assert isinstance(invocation_parameters := attributes.pop("llm.invocation_parameters"), str)
         assert json.loads(invocation_parameters) == {
             "temperature": 0.1,
@@ -561,7 +621,7 @@ class TestChatCompletionSubscription:
                         ]
                     },
                     "modelProvider": "OPENAI",
-                    "modelName": "gpt-4",
+                    "modelName": "gpt-4o",
                     "invocationParameters": {"openai": {}},
                     "tools": {
                         "tools": [
@@ -668,7 +728,7 @@ class TestChatCompletionSubscription:
         assert not span
 
         assert attributes.pop(OPENINFERENCE_SPAN_KIND) == LLM
-        assert attributes.pop(LLM_MODEL_NAME) == "gpt-4"
+        assert attributes.pop(LLM_MODEL_NAME) == "gpt-4o"
         assert isinstance(invocation_paramaters := attributes.pop(LLM_INVOCATION_PARAMETERS), str)
         assert json.loads(invocation_paramaters) == {
             "tool_choice": "auto",
@@ -759,7 +819,7 @@ class TestChatCompletionSubscription:
                         ]
                     },
                     "modelProvider": "OPENAI",
-                    "modelName": "gpt-4",
+                    "modelName": "gpt-4o",
                     "invocationParameters": {"openai": {}},
                     "tools": None,
                 },
@@ -851,7 +911,7 @@ class TestChatCompletionSubscription:
         assert attributes.pop(OPENINFERENCE_SPAN_KIND) == LLM
         assert isinstance(invocation_paramaters := attributes.pop(LLM_INVOCATION_PARAMETERS), str)
         assert json.loads(invocation_paramaters) == {}
-        assert attributes.pop(LLM_MODEL_NAME) == "gpt-4"
+        assert attributes.pop(LLM_MODEL_NAME) == "gpt-4o"
         assert attributes.pop(LLM_TOKEN_COUNT_TOTAL) == token_count_total
         assert attributes.pop(LLM_TOKEN_COUNT_PROMPT) == token_count_prompt
         assert attributes.pop(LLM_TOKEN_COUNT_COMPLETION) == token_count_completion
@@ -1206,7 +1266,7 @@ class TestChatCompletionOverDatasetSubscription:
                         ]
                     },
                     "modelProvider": "OPENAI",
-                    "modelName": "gpt-4",
+                    "modelName": "gpt-4o",
                     "invocationParameters": {"openai": {}},
                     "tools": None,
                 },
@@ -1359,7 +1419,7 @@ class TestChatCompletionOverDatasetSubscription:
         assert attributes.pop(OPENINFERENCE_SPAN_KIND) == LLM
         assert isinstance(invocation_paramaters := attributes.pop(LLM_INVOCATION_PARAMETERS), str)
         assert json.loads(invocation_paramaters) == {}
-        assert attributes.pop(LLM_MODEL_NAME) == "gpt-4"
+        assert attributes.pop(LLM_MODEL_NAME) == "gpt-4o"
         assert attributes.pop(LLM_TOKEN_COUNT_TOTAL) == token_count_total
         assert attributes.pop(LLM_TOKEN_COUNT_PROMPT) == token_count_prompt
         assert attributes.pop(LLM_TOKEN_COUNT_COMPLETION) == token_count_completion
@@ -1449,7 +1509,7 @@ class TestChatCompletionOverDatasetSubscription:
         assert attributes.pop(OPENINFERENCE_SPAN_KIND) == LLM
         assert isinstance(invocation_paramaters := attributes.pop(LLM_INVOCATION_PARAMETERS), str)
         assert json.loads(invocation_paramaters) == {}
-        assert attributes.pop(LLM_MODEL_NAME) == "gpt-4"
+        assert attributes.pop(LLM_MODEL_NAME) == "gpt-4o"
         assert attributes.pop(LLM_TOKEN_COUNT_TOTAL) == token_count_total
         assert attributes.pop(LLM_TOKEN_COUNT_PROMPT) == token_count_prompt
         assert attributes.pop(LLM_TOKEN_COUNT_COMPLETION) == token_count_completion
@@ -1612,7 +1672,7 @@ class TestChatCompletionOverDatasetSubscription:
                         ]
                     },
                     "modelProvider": "OPENAI",
-                    "modelName": "gpt-4",
+                    "modelName": "gpt-4o",
                     "invocationParameters": {"openai": {}},
                     "tools": None,
                 },
@@ -1720,7 +1780,7 @@ class TestChatCompletionOverDatasetSubscription:
                         ]
                     },
                     "modelProvider": "OPENAI",
-                    "modelName": "gpt-4",
+                    "modelName": "gpt-4o",
                     "invocationParameters": {"openai": {}},
                     "tools": None,
                 },
@@ -1812,7 +1872,7 @@ class TestChatCompletionOverDatasetSubscription:
                         ]
                     },
                     "modelProvider": "OPENAI",
-                    "modelName": "gpt-4",
+                    "modelName": "gpt-4o",
                     "invocationParameters": {"openai": {}},
                     "tools": None,
                 },
@@ -1964,7 +2024,7 @@ class TestChatCompletionOverDatasetSubscription:
                         ]
                     },
                     "modelProvider": "OPENAI",
-                    "modelName": "gpt-4",
+                    "modelName": "gpt-4o",
                     "invocationParameters": {"openai": {}},
                     "tools": None,
                 },
@@ -2035,7 +2095,7 @@ class TestChatCompletionOverDatasetSubscription:
                         ]
                     },
                     "modelProvider": "OPENAI",
-                    "modelName": "gpt-4",
+                    "modelName": "gpt-4o",
                     "invocationParameters": {"openai": {}},
                     "tools": None,
                 },
@@ -2136,7 +2196,7 @@ class TestChatCompletionOverDatasetSubscription:
                         ]
                     },
                     "modelProvider": "OPENAI",
-                    "modelName": "gpt-4",
+                    "modelName": "gpt-4o",
                     "invocationParameters": {"openai": {}},
                     "tools": None,
                 },
@@ -2383,7 +2443,7 @@ class TestChatCompletionOverDatasetSubscription:
             assert llm_llm_span.cumulative_llm_token_count_completion > 0
             attributes = dict(flatten(llm_llm_span.attributes, recurse_on_sequence=True))
             assert attributes.pop(OPENINFERENCE_SPAN_KIND) == "LLM"
-            assert attributes.pop(LLM_MODEL_NAME) == "gpt-4"
+            assert attributes.pop(LLM_MODEL_NAME) == "gpt-4o"
             assert attributes.pop(LLM_PROVIDER) == "openai"
             assert attributes.pop(LLM_SYSTEM) == "openai"
             assert attributes.pop(URL_FULL) == "https://api.openai.com/v1/chat/completions"
@@ -2835,7 +2895,7 @@ class TestChatCompletionOverDatasetSubscription:
                         ]
                     },
                     "modelProvider": "OPENAI",
-                    "modelName": "gpt-4",
+                    "modelName": "gpt-4o",
                     "invocationParameters": {"openai": {}},
                     "tools": None,
                 },
