@@ -34,10 +34,10 @@ NC := \033[0m # No Color
 	graphql schema-graphql relay-build \
 	openapi schema-openapi schema-generative-ui ui-message-stream-fixtures codegen-python-client codegen-ts-client codegen-ts-app codegen-harbor-graphql \
 	dev dev-backend dev-frontend dev-docker dev-mock-llm \
-	test test-python test-frontend test-ts test-helm test-jcs doctest typecheck typecheck-python typecheck-python-ty typecheck-frontend typecheck-ts \
+	test test-python test-factory test-frontend test-ts test-helm test-jcs doctest typecheck typecheck-python typecheck-python-ty typecheck-frontend typecheck-ts \
 	format format-python format-frontend format-ts lint lint-python lint-frontend lint-ts clean-notebooks \
 	build build-python build-frontend build-ts \
-	skills skills-check codegen-prompts sync-models test-sync-models schema-ddl check-graphql-permissions check-filter-dsl-snippets check-skill-graphql-examples check-skill-filter-examples sync-docs-snippets check-docs-snippets gen-otel-models \
+	skills skills-check codegen-prompts sync-models test-sync-models schema-ddl check-graphql-permissions check-filter-dsl-snippets check-skill-graphql-examples check-skill-filter-examples check-skill-python-examples check-skill-typescript-examples check-skill-px-commands sync-docs-snippets check-docs-snippets gen-otel-models \
 	test-integration-docs \
 	gh-comment-watch \
 	harbor-stage harbor-plugin-e2e harbor-run harbor-view \
@@ -80,6 +80,7 @@ help: ## Show this help message
 	@echo -e "  $(YELLOW)test$(NC)                  - Run all tests (Python + TypeScript workspace)"
 	@echo -e "  test-python            - Run Python tests (unit + integration)"
 	@echo -e "  test-frontend          - Run frontend tests only (js/app/)"
+	@echo -e "  test-factory           - Run Factory tests"
 	@echo -e "  test-ts                - Run all TypeScript tests (js/ workspace)"
 	@echo -e "  test-helm              - Run Helm chart tests"
 	@echo -e "  test-integration-docs  - Run configured integration docs against a running Phoenix server"
@@ -104,6 +105,9 @@ help: ## Show this help message
 	@echo -e "  check-filter-dsl-snippets - Ensure UI filter DSL snippets compile under the Python filters"
 	@echo -e "  check-skill-graphql-examples - Ensure GraphQL examples in shipped skills validate against the schema"
 	@echo -e "  check-skill-filter-examples - Ensure filter conditions in shipped skills compile under the Python filters"
+	@echo -e "  check-skill-python-examples - Ensure Python examples in public skills type-check against the client packages"
+	@echo -e "  check-skill-typescript-examples - Ensure TypeScript examples in public skills type-check against the client packages"
+	@echo -e "  check-skill-px-commands - Ensure px commands in public skills match the CLI's commands and flags"
 	@echo -e "  sync-docs-snippets     - Copy examples/quickstarts code into the docs' fenced code blocks"
 	@echo -e "  check-docs-snippets    - Ensure docs' fenced code blocks match examples/quickstarts"
 	@echo -e ""
@@ -116,7 +120,7 @@ help: ## Show this help message
 	@echo -e "  gh-comment-watch       - Start the GitHub comment watcher"
 	@echo -e ""
 	@echo -e "$(GREEN)Harbor Evals:$(NC)"
-	@echo -e "  $(YELLOW)harbor-stage$(NC)             - Build the Phoenix and client wheels, produce each fixture, stage each task environment, and build the px CLI archive (HF_TOKEN=... for the TRAIL fixture, RESEED=1, HARBOR_CLI=0 to skip the archive)"
+	@echo -e "  $(YELLOW)harbor-stage$(NC)             - Prepare HARBOR_JOB tasks and fixtures, build wheels, and infer the px CLI archive from agents (HARBOR_JOB=..., RESEED=1, HARBOR_CLI=auto|0|1)"
 	@echo -e "  $(YELLOW)harbor-plugin-e2e$(NC)       - Manually run the credentialed Harbor plugin E2E matrix"
 	@echo -e "  $(YELLOW)harbor-run$(NC)               - Run a Harbor job file with the Phoenix plugin (HARBOR_JOB=..., HARBOR_ARGS=...)"
 	@echo -e "  harbor-view               - Browse Harbor job results in a local web viewer"
@@ -287,6 +291,9 @@ dev-frontend: ## Frontend only (React dev server)
 #=============================================================================
 # Testing
 #=============================================================================
+
+test-factory:
+	@$(UV) run pytest --import-mode=prepend -q factory/
 
 test-integration-docs: ## Run configured integration docs against a running Phoenix server
 	@$(UV) run python scripts/testing/integration_docs/run.py $(INTEGRATION_DOCS_ARGS)
@@ -481,6 +488,25 @@ check-skill-filter-examples: ## Ensure span/trace/session filter conditions in s
 	@$(UV) run pytest -q $(CURDIR)/scripts/ci/test_skill_filter_dsl_examples.py
 	@echo -e "$(GREEN)✓ Done$(NC)"
 
+check-skill-python-examples: ## Ensure Python examples in public skills type-check against the workspace client packages
+	@echo -e "$(CYAN)Type-checking skill Python examples with pyright...$(NC)"
+	@$(UV) run pytest -q $(CURDIR)/scripts/ci/test_skill_python_examples.py $(CURDIR)/scripts/ci/test_skill_lint.py
+	@echo -e "$(GREEN)✓ Done$(NC)"
+
+check-skill-typescript-examples: ## Ensure TypeScript examples in public skills type-check against the workspace client packages (needs pnpm install in js/)
+	@echo -e "$(CYAN)Building the TypeScript client packages...$(NC)"
+	@cd $(JS_DIR) && $(PNPM) --filter "@arizeai/phoenix-client..." --filter "@arizeai/phoenix-evals..." --filter "@arizeai/phoenix-otel..." run build >/dev/null
+	@echo -e "$(CYAN)Type-checking skill TypeScript examples with tsc...$(NC)"
+	@$(UV) run pytest -q $(CURDIR)/scripts/ci/test_skill_typescript_examples.py
+	@echo -e "$(GREEN)✓ Done$(NC)"
+
+check-skill-px-commands: ## Ensure px commands in public skills match the CLI's commands and flags (needs pnpm install in js/)
+	@echo -e "$(CYAN)Building the px CLI's workspace dependencies...$(NC)"
+	@cd $(JS_DIR) && $(PNPM) --filter "@arizeai/phoenix-cli^..." run build >/dev/null
+	@echo -e "$(CYAN)Checking skill px commands against the CLI...$(NC)"
+	@$(UV) run pytest -q $(CURDIR)/scripts/ci/test_skill_px_commands.py
+	@echo -e "$(GREEN)✓ Done$(NC)"
+
 # These two call python3 directly: the script is stdlib-only and its CI job has no uv.
 sync-docs-snippets: ## Copy examples/quickstarts code into the docs' fenced code blocks
 	@echo -e "$(CYAN)Syncing docs code blocks from examples/quickstarts...$(NC)"
@@ -535,14 +561,14 @@ gh-comment-watch: ## Start the GitHub comment watcher
 # configured agents.
 HARBOR_JOB ?= evals/harbor/jobs/regression.yaml
 HARBOR_ARGS ?=
-# harbor-stage downloads the error-analysis fixture, creates the TRAIL fixture when
-# HF_TOKEN is set, and builds the px archive. Set HARBOR_CLI=0 to skip the archive.
-HARBOR_CLI ?= 1
+# Both preparation and preflight select tasks from HARBOR_JOB. Build the px archive
+# when the job uses CLI agents. HARBOR_CLI=0 or 1 overrides automatic detection.
+HARBOR_CLI ?= auto
 # The arize-phoenix plugin records tasks, trials, scores, and traces under a dataset
-# named after the job's task directory. HARBOR_DATASET overrides the name. Set
+# named after the dataset directory. HARBOR_DATASET overrides the name. Set
 # HARBOR_PLUGIN to an empty value to disable recording.
-HARBOR_DATASET ?=
-HARBOR_PLUGIN ?= --plugin arize-phoenix $(if $(HARBOR_DATASET),--plugin-kwarg dataset=$(HARBOR_DATASET),)
+HARBOR_DATASET ?= $(shell $(UV) run --script evals/harbor/scripts/check_job_staged.py "$(HARBOR_JOB)" --dataset-name)
+HARBOR_PLUGIN ?= --plugin arize-phoenix --plugin-kwarg dataset="$(HARBOR_DATASET)"
 HARBOR_VERSION ?= 0.21.0
 # The client package provides the arize-phoenix Harbor plugin. harbor-stage builds it from
 # this checkout so a job records with the plugin in the tree. Set HARBOR_CLIENT_VERSION to
@@ -561,16 +587,12 @@ HARBOR = $(HARBOR_UVX) --with '$(HARBOR_CLIENT)' harbor
 # Require the px archive only when HARBOR_ARGS does not replace the configured agents, and
 # the client wheel only when no released client version is selected.
 define check-harbor-staged
-	@$(UV) run --script evals/harbor/scripts/check_job_staged.py $(HARBOR_JOB) $(if $(filter -a,$(HARBOR_ARGS)),--agents-replaced,) $(if $(HARBOR_CLIENT_VERSION),,--client-wheel-dir $(HARBOR_CLIENT_WHEEL_DIR))
+	@$(UV) run --script evals/harbor/scripts/check_job_staged.py $(HARBOR_JOB) $(if $(filter -a --agent-name --agent-name=%,$(HARBOR_ARGS)),--agents-replaced,) $(if $(HARBOR_CLIENT_VERSION),,--client-wheel-dir $(HARBOR_CLIENT_WHEEL_DIR))
 endef
 
-harbor-stage: ## Build the Phoenix and client wheels, produce each fixture, stage each task environment, and build the px CLI archive (HF_TOKEN=..., RESEED=1, HARBOR_CLI=0, HARBOR_CLI_PLATFORM=..., HARBOR_CLIENT_VERSION=...)
+harbor-stage: ## Prepare HARBOR_JOB tasks and fixtures, build wheels, and infer the px CLI archive from agents (HF_TOKEN=..., RESEED=1, HARBOR_CLI=0, HARBOR_CLI_PLATFORM=..., HARBOR_CLIENT_VERSION=...)
 	@echo -e "$(CYAN)Staging Harbor task environments...$(NC)"
-	./evals/harbor/scripts/stage_harbor_environments.sh
-	$(if $(HARBOR_CLIENT_VERSION),@echo -e "$(YELLOW)Skipping the client wheel (HARBOR_CLIENT_VERSION=$(HARBOR_CLIENT_VERSION))$(NC)",\
-	rm -rf $(HARBOR_CLIENT_WHEEL_DIR) && $(UV) build --wheel packages/phoenix-client --out-dir $(HARBOR_CLIENT_WHEEL_DIR))
-	$(if $(filter 0,$(HARBOR_CLI)),@echo -e "$(YELLOW)Skipping the px CLI archive (HARBOR_CLI=0)$(NC)",\
-	./evals/harbor/scripts/build_phoenix_cli_archive.sh)
+	HARBOR_JOB="$(HARBOR_JOB)" HARBOR_CLI="$(HARBOR_CLI)" HARBOR_CLIENT_VERSION="$(HARBOR_CLIENT_VERSION)" ./evals/harbor/scripts/stage_harbor_environments.sh $(if $(filter -a --agent-name --agent-name=%,$(HARBOR_ARGS)),--agents-replaced,)
 	@echo -e "$(GREEN)✓ Done$(NC)"
 
 harbor-plugin-e2e: ## Manually run the credentialed Harbor plugin E2E matrix
